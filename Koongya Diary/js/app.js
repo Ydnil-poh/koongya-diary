@@ -10,18 +10,34 @@ let CONFIG = {
     GEMINI_API_KEY: ''
 };
 
-// 로컬 설정 파일을 시도하고 실패하면 배포 환경 변수를 사용합니다.
-try {
-    const module = await import('./config.js');
-    if (module.CONFIG) CONFIG = module.CONFIG;
-} catch (e) {
-    // 배포 환경에서는 Vercel 등에서 주입한 전역 변수를 사용하게 됩니다.
-    CONFIG = {
-        SUPABASE_URL: window.ENV_SUPABASE_URL || '',
-        SUPABASE_ANON_KEY: window.ENV_SUPABASE_ANON_KEY || '',
-        GEMINI_API_KEY: window.ENV_GEMINI_API_KEY || ''
-    };
+async function initializeConfig() {
+    try {
+        // 1. 먼저 배포 서버(Vercel)의 보안 API에 키를 물어봅니다.
+        const response = await fetch('/api/config');
+        if (response.ok) {
+            const serverConfig = await response.json();
+            // 서버에 실제 값이 들어있을 때만 교체
+            if (serverConfig.SUPABASE_URL) {
+                CONFIG = serverConfig;
+                console.log("[System] 서버 보안 설정을 로드했습니다.");
+                return;
+            }
+        }
+    } catch (e) {
+        console.log("[System] 서버 API 응답 없음. 로컬 모드로 진행합니다.");
+    }
+
+    try {
+        // 2. 서버에 없으면 로컬의 config.js를 사용합니다.
+        const module = await import('./config.js');
+        if (module.CONFIG) CONFIG = module.CONFIG;
+        console.log("[System] 로컬 설정 파일을 로드했습니다.");
+    } catch (e) {
+        console.error("[System] 설정을 불러올 수 없습니다. API 키를 확인해주세요.");
+    }
 }
+
+await initializeConfig();
 
 const supabase = createClient(CONFIG.SUPABASE_URL, CONFIG.SUPABASE_ANON_KEY, {
   auth: { persistSession: true, autoRefreshToken: true, detectSessionInUrl: true, storageKey: 'koongya-diary-auth' }

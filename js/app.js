@@ -171,18 +171,21 @@ async function updateUIForAuth(session) {
     const loginScreen = getEl('login-screen');
     const gardenContainer = document.querySelector('.garden-container');
     const archiveBtn = getEl('archive-btn');
+    const topControls = getEl('top-controls');
     if (session) {
         currentUser = session.user;
         if (loginScreen) loginScreen.style.display = 'none';
         if (gardenContainer) { gardenContainer.style.display = 'block'; requestAnimationFrame(() => gardenContainer.classList.add('visible')); }
-        if (archiveBtn) archiveBtn.classList.remove('hidden');
+        if (topControls) topControls.classList.remove('hidden');
+        else if (archiveBtn) archiveBtn.classList.remove('hidden');
         loadGardenFromLocal();
         await Promise.all([loadActiveKoongyas(), updateUnlockedList()]);
     } else {
         currentUser = null;
         if (loginScreen) { loginScreen.style.display = 'flex'; loginScreen.classList.remove('hidden'); }
         if (gardenContainer) { gardenContainer.classList.remove('visible'); gardenContainer.style.display = 'none'; }
-        if (archiveBtn) archiveBtn.classList.add('hidden');
+        if (topControls) topControls.classList.add('hidden');
+        else if (archiveBtn) archiveBtn.classList.add('hidden');
         hideLoadingOverlay();
     }
 }
@@ -468,9 +471,9 @@ async function loadArchives() {
                         <div class="polaroid-image"><img src="${item.image_path}" alt="${item.koongya_type}" onerror="this.src='https://via.placeholder.com/150'"></div>
                         <div class="polaroid-caption">
                             <p class="archive-question">"${item.core_question}"</p>
-                            <div class="archive-diary hidden" style="font-size:0.8rem; background:#f0f0f0; padding:10px; border-radius:5px; margin:10px 0;">${item.final_diary || "기록 없음"}</div>
                             <span>${koongyaData ? koongyaData.name : item.koongya_type} - ${new Date(item.graduated_at).toLocaleDateString()}</span>
-                            <button class="view-diary-btn" style="margin-top:10px; padding:4px 8px; font-size:0.7rem;" onclick="this.previousElementSibling.classList.toggle('hidden')">일기 보기/닫기</button>
+                            <div class="archive-diary hidden" style="font-size:0.85rem; background:#f0f0f0; padding:15px; border-radius:10px; margin:15px 0; text-align: left; white-space: pre-wrap; line-height: 1.5; color: #333; box-shadow: inset 0 2px 4px rgba(0,0,0,0.05);">${item.final_diary || "기록 없음"}</div>
+                            <button class="view-diary-btn" style="margin-top:10px; padding:6px 12px; font-size:0.8rem; background-color: #8bc34a; color: white; border: none; border-radius: 5px; cursor: pointer; font-family: 'NeoDunggeunmo', 'Galmuri11', sans-serif;" onclick="this.previousElementSibling.classList.toggle('hidden')">마지막 일기 보기</button>
                         </div>
                     </div>
                 </div>`;
@@ -489,6 +492,8 @@ async function initApp() {
     getEl('close-graduation-modal').onclick = () => getEl('graduation-modal').classList.add('hidden');
     getEl('archive-btn').onclick = () => { getEl('archive-panel').classList.remove('hidden'); loadArchives(); };
     getEl('close-archive').onclick = () => getEl('archive-panel').classList.add('hidden');
+    getEl('guide-btn').onclick = () => getEl('guide-modal').classList.remove('hidden');
+    getEl('close-guide-btn').onclick = () => getEl('guide-modal').classList.add('hidden');
     getEl('chat-input').onkeypress = (e) => { if (e.key === 'Enter') { e.preventDefault(); handleSendMessage(); } };
     getEl('password-input').onkeypress = (e) => { if (e.key === 'Enter') { e.preventDefault(); handleEmailLogin(); } };
     getEl('retrospective-btn').onclick = openRetrospective;
@@ -516,9 +521,16 @@ async function initApp() {
     
     setTimeout(() => { const welcome = getEl('welcome-message'); if (welcome) welcome.remove(); }, 8000);
     setTimeout(hideLoadingOverlay, 5000);
-    supabase.auth.onAuthStateChange(async (event, session) => {
-        if (event === 'SIGNED_IN' || event === 'INITIAL_SESSION') await updateUIForAuth(session);
-        else if (event === 'SIGNED_OUT') await updateUIForAuth(null);
+    // [치명적 버그 수정] onAuthStateChange 내부에서 await supabase.from()을 직접 호출하면,
+    // 새로고침 시 토큰 검증 로직과 충돌하여 Supabase 클라이언트 전체가 영구적으로 멈추는(Hang) 현상이 발생합니다.
+    // 이를 방지하기 위해 setTimeout을 사용하여 자바스크립트 이벤트 루프의 실행 순서를 분리합니다.
+    supabase.auth.onAuthStateChange((event, session) => {
+        if (event === 'SIGNED_IN' || event === 'INITIAL_SESSION') {
+            setTimeout(() => { updateUIForAuth(session).catch(e => console.error("UI 업데이트 에러:", e)); }, 0);
+        }
+        else if (event === 'SIGNED_OUT') {
+            setTimeout(() => { updateUIForAuth(null).catch(e => console.error("UI 초기화 에러:", e)); }, 0);
+        }
     });
 }
 if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', initApp);

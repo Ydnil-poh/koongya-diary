@@ -139,7 +139,6 @@ async function updateUIForAuth(session) {
         if (loginScreen) loginScreen.style.display = 'none';
         if (gardenContainer) { gardenContainer.style.display = 'block'; requestAnimationFrame(() => gardenContainer.classList.add('visible')); }
         if (archiveBtn) archiveBtn.classList.remove('hidden');
-        setupGardenEventListeners();
         loadGardenFromLocal();
         await Promise.all([loadActiveKoongyas(), updateUnlockedList()]);
     } else {
@@ -181,18 +180,7 @@ async function handleGoogleLogin() {
     await supabase.auth.signInWithOAuth({ provider: 'google', options: { redirectTo: window.location.origin } });
 }
 
-function setupGardenEventListeners() {
-    const gridContainer = getEl('grid-container');
-    if (!gridContainer || gridContainer.dataset.listenersSet) return;
-    gridContainer.onclick = (e) => {
-        const cell = e.target.closest('.cell');
-        if (!cell) return;
-        selectedCellIndex = cell.getAttribute('data-index');
-        if (cell.classList.contains('empty')) openSeedPopup();
-        else openChatPanel(cell);
-    };
-    gridContainer.dataset.listenersSet = "true";
-}
+
 
 async function loadActiveKoongyas() {
     if (!currentUser) return;
@@ -265,9 +253,11 @@ async function updateRetroButtonVisibility() {
     const { count, error } = await supabase.from('chat_logs').select('*', { count: 'exact', head: true }).eq('koongya_id', currentDbId).eq('sender', 'user');
     const retroBtn = getEl('retrospective-btn');
     if (retroBtn && !error) {
-        let requiredCount = 5; // 1단계 기본: 5번
-        if (currentStep >= 2 && currentStep <= 4) requiredCount = 3; // 2~4단계: 3번
-        else if (currentStep === 5) requiredCount = 1; // 5단계: 1번
+        let requiredCount = 5; // 1단계: 누적 5번
+        if (currentStep === 2) requiredCount = 8; // 누적 8번 (5+3)
+        else if (currentStep === 3) requiredCount = 11; // 누적 11번 (8+3)
+        else if (currentStep === 4) requiredCount = 14; // 누적 14번 (11+3)
+        else if (currentStep === 5) requiredCount = 15; // 누적 15번 (14+1)
         
         if (count >= requiredCount) retroBtn.classList.remove('hidden');
         else retroBtn.classList.add('hidden');
@@ -327,7 +317,11 @@ async function handleSendMessage() {
         await saveChatLog(currentDbId, 'ai', responseText);
     } catch (error) { 
         if (loadingUI) loadingUI.classList.add('hidden'); 
-        showToast("에러: " + error.message);
+        if (error.message && error.message.includes("429")) {
+            showToast("AI가 잠시 생각할 시간이 필요해요. (1분 후 다시 시도해 주세요)");
+        } else {
+            showToast("에러: " + (error.message || "알 수 없는 오류"));
+        }
     } finally { if (sendBtn) sendBtn.disabled = false; }
 }
 
@@ -357,7 +351,11 @@ async function generateAIInsight() {
         aiKeywordsContainer.innerHTML = `<div class="insight-box">${result.response.text().replace(/\n/g, '<br>')}</div>`;
     } catch (error) { 
         console.error("AI 회고 분석 에러:", error);
-        aiKeywordsContainer.innerHTML = "<p>분석 실패: " + (error.message || "오류") + "</p>"; 
+        if (error.message && error.message.includes("429")) {
+            aiKeywordsContainer.innerHTML = "<p>분석 실패: AI가 잠시 생각할 시간이 필요해요 (1분 후 다시 시도해 주세요).</p>"; 
+        } else {
+            aiKeywordsContainer.innerHTML = "<p>분석 실패: " + (error.message || "오류") + "</p>"; 
+        }
     } finally {
         if (regenBtn) regenBtn.disabled = false;
     }

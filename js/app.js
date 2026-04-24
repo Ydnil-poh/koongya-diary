@@ -286,12 +286,19 @@ async function handleSendMessage() {
     chatLog.innerHTML += `<div class="chat-bubble chat-bubble-user">${message}</div>`;
     chatLog.scrollTop = chatLog.scrollHeight;
     chatInput.value = "";
-    updateRetroButtonVisibility();
+    updateRetroButtonVisibility().catch(e => console.error(e));
     if (loadingUI) loadingUI.classList.remove('hidden');
     try {
+        // [수정] 이전 대화 기록 가져오기 (문맥 유지)
+        const { data: logs } = await supabase.from('chat_logs').select('sender, message').eq('koongya_id', currentDbId).order('created_at', { ascending: true }).limit(10);
+        let chatContext = "";
+        if (logs && logs.length > 0) {
+            chatContext = logs.map(l => `${l.sender === 'user' ? '사용자' : '쿵야'}: ${l.message}`).join("\n") + "\n";
+        }
+        
         const model = genAI.getGenerativeModel({ model: GEMINI_MODEL }); 
         const systemPrompt = `너는 ${currentKoongyaName} 쿵야야. 성격: ${KOONGYA_ORDER.find(k => k.id === currentKoongyaId).description}. [절대 규칙] 1. 이모지 금지. 2. 마크다운(**, # 등) 금지. 3. 순수 텍스트만 사용.`;
-        const result = await model.generateContent(`${systemPrompt}\n\n사용자: "${message}"`);
+        const result = await model.generateContent(`${systemPrompt}\n\n[이전 대화]\n${chatContext}\n[현재 대화]\n사용자: "${message}"\n쿵야:`);
         if (loadingUI) loadingUI.classList.add('hidden');
         const responseText = result.response.text();
         chatLog.innerHTML += `<div class="chat-bubble chat-bubble-ai">${responseText}</div>`;
@@ -303,7 +310,13 @@ async function handleSendMessage() {
     } finally { if (sendBtn) sendBtn.disabled = false; }
 }
 
-async function saveChatLog(dbId, sender, message) { await supabase.from('chat_logs').insert([{ koongya_id: dbId, sender, message }]); }
+async function saveChatLog(dbId, sender, message) { 
+    const { error } = await supabase.from('chat_logs').insert([{ koongya_id: dbId, sender, message }]); 
+    if (error) {
+        console.error("채팅 저장 에러:", error);
+        showToast("채팅 저장 실패: " + error.message);
+    }
+}
 
 async function generateAIInsight() {
     const aiKeywordsContainer = getEl('ai-keywords');

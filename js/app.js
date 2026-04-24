@@ -114,7 +114,8 @@ function renderGarden(data) {
 async function updateUnlockedList() {
     if (!currentUser) return;
     try {
-        const { data } = await supabase.from('archives').select('koongya_type');
+        // [버그 수정] 모든 기록이 아닌 '나(currentUser.id)'의 졸업 기록만 가져오도록 필터링 추가
+        const { data } = await supabase.from('archives').select('koongya_type').eq('user_id', currentUser.id);
         const graduatedIds = data ? data.map(item => item.koongya_type) : [];
         let newUnlocked = ['onion'];
         KOONGYA_ORDER.forEach((koongya, index) => {
@@ -226,7 +227,10 @@ async function plantSeed(koongyaType) {
         await loadActiveKoongyas();
         getEl('seed-popup').classList.add('hidden');
         showToast(`${koongyaType} 쿵야를 심었습니다!`);
-    } catch (error) { showToast("오류 발생"); }
+    } catch (error) { 
+        showToast("심기 실패: " + (error.message || "오류 발생"));
+        console.error("쿵야 심기 에러 상세:", error);
+    }
 }
 window.plantSeed = plantSeed;
 

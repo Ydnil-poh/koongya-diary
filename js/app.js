@@ -239,7 +239,13 @@ async function openChatPanel(cell) {
         currentDbId = cell.getAttribute('data-db-id');
         currentKoongyaId = cell.getAttribute('data-koongya-id');
         currentStep = parseInt(cell.getAttribute('data-step')) || 1;
-        if (!currentDbId) { await loadActiveKoongyas(); return; }
+        
+        // [버그 수정] 새로고침 시 data-db-id가 "undefined" 텍스트로 들어가는 현상 방지
+        if (!currentDbId || currentDbId === "undefined" || currentDbId === "null") { 
+            await loadActiveKoongyas(); 
+            return; 
+        }
+        
         const koongyaData = KOONGYA_ORDER.find(k => k.id === currentKoongyaId);
         currentKoongyaName = koongyaData ? koongyaData.name : "쿵야";
         updateRetroButtonVisibility().catch(e => console.error(e));
@@ -248,7 +254,10 @@ async function openChatPanel(cell) {
         chatLog.innerHTML = "<p style='text-align:center; color:#999;'>불러오는 중...</p>"; 
         await loadChatHistory(currentDbId);
         getEl('chat-panel').classList.remove('hidden'); 
-    } catch (err) { showToast("실패"); }
+    } catch (err) { 
+        console.error("채팅창 열기 에러:", err);
+        showToast("채팅창 열기 실패: " + (err.message || "알 수 없는 오류")); 
+    }
 }
 
 async function updateRetroButtonVisibility() {
@@ -328,10 +337,18 @@ async function generateAIInsight() {
         const { data: logs } = await supabase.from('chat_logs').select('sender, message').eq('koongya_id', currentDbId).order('created_at', { ascending: true }).limit(10);
         const chatContext = logs.map(l => `${l.sender === 'user' ? '사용자' : '쿵야'}: ${l.message}`).join("\n");
         const model = genAI.getGenerativeModel({ model: GEMINI_MODEL });
-        const result = await model.generateContent(`다음 대화를 분석해줘. 마크다운 금지. 순수 텍스트로만 답변.\n\n${chatContext}`);
+        
+        // [버그 수정] 회고 분석용 프롬프트를 쿵야의 캐릭터성과 심리 상담 요약을 결합하여 명확하게 수정
+        const systemPrompt = `너는 ${currentKoongyaName} 쿵야야. 사용자와 나눈 대화를 바탕으로, 오늘 사용자의 기분이나 주요 관심사를 따뜻하고 캐릭터다운 말투로 2~3문장으로 짧게 요약해줘. [절대 규칙] 1. 마크다운(**, # 등) 금지. 2. 순수 텍스트만 사용. 3. ~쿵, ~야 등 쿵야체 사용.`;
+        const result = await model.generateContent(`${systemPrompt}\n\n[대화 기록]\n${chatContext}`);
+        
         aiKeywordsContainer.innerHTML = `<div class="insight-box">${result.response.text().replace(/\n/g, '<br>')}</div>`;
-    } catch (error) { aiKeywordsContainer.innerHTML = "<p>실패</p>"; }
-    finally { if (regenBtn) regenBtn.disabled = false; }
+    } catch (error) { 
+        console.error("AI 회고 분석 에러:", error);
+        aiKeywordsContainer.innerHTML = "<p>분석 실패: " + (error.message || "오류") + "</p>"; 
+    } finally {
+        if (regenBtn) regenBtn.disabled = false;
+    }
 }
 
 async function openRetrospective() {

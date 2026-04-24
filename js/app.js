@@ -243,6 +243,7 @@ async function openChatPanel(cell) {
         // [버그 수정] 새로고침 시 data-db-id가 "undefined" 텍스트로 들어가는 현상 방지
         if (!currentDbId || currentDbId === "undefined" || currentDbId === "null") { 
             await loadActiveKoongyas(); 
+            showToast("정원을 최신 상태로 동기화했습니다. 다시 클릭해 주세요!");
             return; 
         }
         
@@ -261,10 +262,14 @@ async function openChatPanel(cell) {
 }
 
 async function updateRetroButtonVisibility() {
-    const { count } = await supabase.from('chat_logs').select('*', { count: 'exact', head: true }).eq('koongya_id', currentDbId).eq('sender', 'user');
+    const { count, error } = await supabase.from('chat_logs').select('*', { count: 'exact', head: true }).eq('koongya_id', currentDbId).eq('sender', 'user');
     const retroBtn = getEl('retrospective-btn');
-    if (retroBtn) {
-        if (count >= 5) retroBtn.classList.remove('hidden');
+    if (retroBtn && !error) {
+        let requiredCount = 5; // 1단계 기본: 5번
+        if (currentStep >= 2 && currentStep <= 4) requiredCount = 3; // 2~4단계: 3번
+        else if (currentStep === 5) requiredCount = 1; // 5단계: 1번
+        
+        if (count >= requiredCount) retroBtn.classList.remove('hidden');
         else retroBtn.classList.add('hidden');
     }
 }
@@ -305,9 +310,16 @@ async function handleSendMessage() {
             chatContext = logs.map(l => `${l.sender === 'user' ? '사용자' : '쿵야'}: ${l.message}`).join("\n") + "\n";
         }
         
+        // [추가] 쿵야가 이전 회고록(일기)을 기억하도록 반영
+        const { data: koongyaDataDb } = await supabase.from('active_koongyas').select('diary_content').eq('id', currentDbId).single();
+        let diaryContext = "";
+        if (koongyaDataDb && koongyaDataDb.diary_content) {
+            diaryContext = `[사용자의 이전 일기 요약]\n"${koongyaDataDb.diary_content}"\n이 내용을 기억하고 공감하는 뉘앙스를 조금 섞어서 대화해.\n\n`;
+        }
+        
         const model = genAI.getGenerativeModel({ model: GEMINI_MODEL }); 
-        const systemPrompt = `너는 ${currentKoongyaName} 쿵야야. 성격: ${KOONGYA_ORDER.find(k => k.id === currentKoongyaId).description}. [절대 규칙] 1. 이모지 금지. 2. 마크다운(**, # 등) 금지. 3. 순수 텍스트만 사용.`;
-        const result = await model.generateContent(`${systemPrompt}\n\n[이전 대화]\n${chatContext}\n[현재 대화]\n사용자: "${message}"\n쿵야:`);
+        const systemPrompt = `너는 ${currentKoongyaName} 쿵야야. 성격: ${KOONGYA_ORDER.find(k => k.id === currentKoongyaId).description}. [절대 규칙] 1. 이모지 금지. 2. 마크다운(**, # 등) 금지. 3. 순수 텍스트만 사용. 4. ~쿵, ~야 등 쿵야체 사용.`;
+        const result = await model.generateContent(`${systemPrompt}\n\n${diaryContext}[이전 대화]\n${chatContext}\n[현재 대화]\n사용자: "${message}"\n쿵야:`);
         if (loadingUI) loadingUI.classList.add('hidden');
         const responseText = result.response.text();
         chatLog.innerHTML += `<div class="chat-bubble chat-bubble-ai">${responseText}</div>`;

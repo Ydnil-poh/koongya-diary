@@ -11,14 +11,29 @@ let CONFIG = {
 };
 
 async function initializeConfig() {
+    // [최적화] 브라우저 캐시(localStorage)에 키가 있으면 즉시 꺼내서 0초 만에 세팅 (Stale-while-revalidate 패턴)
+    const cachedConfig = localStorage.getItem('koongya_config');
+    if (cachedConfig) {
+        try {
+            CONFIG = JSON.parse(cachedConfig);
+            console.log("[System] 로컬 캐시에서 설정을 즉시 로드했습니다.");
+            
+            // 캐시를 믿고 백그라운드에서 조용히 최신 키를 다시 받아와서 업데이트
+            fetch('/api/config').then(res => res.json()).then(serverConfig => {
+                if (serverConfig.SUPABASE_URL) localStorage.setItem('koongya_config', JSON.stringify(serverConfig));
+            }).catch(() => {});
+            return;
+        } catch(e) {}
+    }
+
     try {
-        // 1. 먼저 배포 서버(Vercel)의 보안 API에 키를 물어봅니다.
+        // 1. 캐시가 없는 최초 접속 시에만 배포 서버(Vercel)를 기다림 (1~2초 지연 발생)
         const response = await fetch('/api/config');
         if (response.ok) {
             const serverConfig = await response.json();
-            // 서버에 실제 값이 들어있을 때만 교체
             if (serverConfig.SUPABASE_URL) {
                 CONFIG = serverConfig;
+                localStorage.setItem('koongya_config', JSON.stringify(serverConfig)); // 다음 접속을 위해 캐싱
                 console.log("[System] 서버 보안 설정을 로드했습니다.");
                 return;
             }
@@ -28,9 +43,12 @@ async function initializeConfig() {
     }
 
     try {
-        // 2. 서버에 없으면 로컬의 config.js를 사용합니다.
+        // 2. 로컬 테스트 환경용
         const module = await import('./config.js');
-        if (module.CONFIG) CONFIG = module.CONFIG;
+        if (module.CONFIG) {
+            CONFIG = module.CONFIG;
+            localStorage.setItem('koongya_config', JSON.stringify(CONFIG));
+        }
         console.log("[System] 로컬 설정 파일을 로드했습니다.");
     } catch (e) {
         console.error("[System] 설정을 불러올 수 없습니다. API 키를 확인해주세요.");
@@ -455,6 +473,23 @@ async function initApp() {
     getEl('chat-input').onkeypress = (e) => { if (e.key === 'Enter') { e.preventDefault(); handleSendMessage(); } };
     getEl('password-input').onkeypress = (e) => { if (e.key === 'Enter') { e.preventDefault(); handleEmailLogin(); } };
     getEl('retrospective-btn').onclick = openRetrospective;
+    
+    // [이벤트 부착] DOM 로드 즉시 확정적으로 부착하여 Supabase 인증 딜레이(타이밍 꼬임)의 영향을 받지 않도록 분리
+    const gridContainer = getEl('grid-container');
+    if (gridContainer) {
+        gridContainer.onclick = (e) => {
+            const cell = e.target.closest('.cell');
+            if (!cell) return;
+            
+            selectedCellIndex = cell.getAttribute('data-index');
+            if (cell.classList.contains('empty')) {
+                openSeedPopup();
+            } else {
+                openChatPanel(cell);
+            }
+        };
+    }
+    
     setTimeout(() => { const welcome = getEl('welcome-message'); if (welcome) welcome.remove(); }, 8000);
     setTimeout(hideLoadingOverlay, 5000);
     supabase.auth.onAuthStateChange(async (event, session) => {

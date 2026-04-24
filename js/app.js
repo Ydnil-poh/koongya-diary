@@ -482,21 +482,25 @@ async function loadArchives() {
 }
 
 async function initApp() {
-    getEl('email-login-btn').onclick = handleEmailLogin;
-    getEl('google-login-btn').onclick = handleGoogleLogin;
-    getEl('send-btn').onclick = handleSendMessage;
-    getEl('close-chat').onclick = () => getEl('chat-panel').classList.add('hidden');
-    getEl('save-diary-btn').onclick = saveDiaryAndEvolve;
-    getEl('close-retrospective').onclick = () => getEl('retrospective-panel').classList.add('hidden');
-    getEl('regenerate-insight-btn').onclick = generateAIInsight;
-    getEl('close-graduation-modal').onclick = () => getEl('graduation-modal').classList.add('hidden');
-    getEl('archive-btn').onclick = () => { getEl('archive-panel').classList.remove('hidden'); loadArchives(); };
-    getEl('close-archive').onclick = () => getEl('archive-panel').classList.add('hidden');
-    getEl('guide-btn').onclick = () => getEl('guide-modal').classList.remove('hidden');
-    getEl('close-guide-btn').onclick = () => getEl('guide-modal').classList.add('hidden');
-    getEl('chat-input').onkeypress = (e) => { if (e.key === 'Enter') { e.preventDefault(); handleSendMessage(); } };
-    getEl('password-input').onkeypress = (e) => { if (e.key === 'Enter') { e.preventDefault(); handleEmailLogin(); } };
-    getEl('retrospective-btn').onclick = openRetrospective;
+    const bindClick = (id, fn) => { const el = getEl(id); if (el) el.onclick = fn; };
+    const bindKey = (id, fn) => { const el = getEl(id); if (el) el.onkeypress = fn; };
+
+    bindClick('email-login-btn', handleEmailLogin);
+    bindClick('google-login-btn', handleGoogleLogin);
+    bindClick('send-btn', handleSendMessage);
+    bindClick('close-chat', () => { const p = getEl('chat-panel'); if(p) p.classList.add('hidden'); });
+    bindClick('save-diary-btn', saveDiaryAndEvolve);
+    bindClick('close-retrospective', () => { const p = getEl('retrospective-panel'); if(p) p.classList.add('hidden'); });
+    bindClick('regenerate-insight-btn', generateAIInsight);
+    bindClick('close-graduation-modal', () => { const m = getEl('graduation-modal'); if(m) m.classList.add('hidden'); });
+    bindClick('archive-btn', () => { const p = getEl('archive-panel'); if(p) { p.classList.remove('hidden'); loadArchives(); } });
+    bindClick('close-archive', () => { const p = getEl('archive-panel'); if(p) p.classList.add('hidden'); });
+    bindClick('guide-btn', () => { const m = getEl('guide-modal'); if(m) m.classList.remove('hidden'); });
+    bindClick('close-guide-btn', () => { const m = getEl('guide-modal'); if(m) m.classList.add('hidden'); });
+    bindClick('retrospective-btn', openRetrospective);
+
+    bindKey('chat-input', (e) => { if (e.key === 'Enter') { e.preventDefault(); handleSendMessage(); } });
+    bindKey('password-input', (e) => { if (e.key === 'Enter') { e.preventDefault(); handleEmailLogin(); } });
     
     // [이벤트 부착] DOM 로드 즉시 확정적으로 부착하여 Supabase 인증 딜레이(타이밍 꼬임)의 영향을 받지 않도록 분리
     // [강력 디버깅 모드] body에 직접 이벤트를 위임하여 100% 감지되도록 보장합니다.

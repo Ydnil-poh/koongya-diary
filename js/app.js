@@ -151,6 +151,7 @@ async function updateUnlockedList() {
     try {
         // [버그 수정] 모든 기록이 아닌 '나(currentUser.id)'의 졸업 기록만 가져오도록 필터링 추가
         const { data } = await supabase.from('archives').select('koongya_type').eq('user_id', currentUser.id);
+        console.log("[디버깅] 아카이브 해금 데이터:", data, "현재 유저:", currentUser.id);
         const graduatedIds = data ? data.map(item => item.koongya_type) : [];
         let newUnlocked = ['onion'];
         KOONGYA_ORDER.forEach((koongya, index) => {
@@ -162,7 +163,8 @@ async function updateUnlockedList() {
             }
         });
         unlockedKoongyas = newUnlocked;
-    } catch (err) { console.error("해금 로드 에러:", err); }
+        console.log("[디버깅] 최종 해금된 쿵야 리스트:", unlockedKoongyas);
+    } catch (err) { console.error("해금 로드 에러:", err); showToast("해금 로드 실패"); }
 }
 
 async function updateUIForAuth(session) {
@@ -243,7 +245,11 @@ function openSeedPopup() {
 }
 
 async function plantSeed(koongyaType) {
-    if (!currentUser) return;
+    if (!currentUser) {
+        showToast("사용자 정보를 잃어버렸습니다. (새로고침 버그)");
+        console.error("[디버깅] plantSeed 실행 시 currentUser가 null입니다!");
+        return;
+    }
     try {
         const { error } = await supabase.from('active_koongyas').insert([{ user_id: currentUser.id, koongya_type: koongyaType, cell_index: parseInt(selectedCellIndex), current_step: 1, diary_content: "" }]);
         if (error) throw error;
@@ -494,6 +500,8 @@ async function initApp() {
             const cell = e.target.closest('.cell');
             if (!cell) return;
             
+            console.log("[디버깅] 빈 셀 클릭 감지됨:", cell.getAttribute('data-index'));
+
             selectedCellIndex = cell.getAttribute('data-index');
             if (cell.classList.contains('empty')) {
                 openSeedPopup();

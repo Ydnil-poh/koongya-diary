@@ -154,8 +154,26 @@ async function handleEmailLogin() {
     const email = getEl('email-input').value;
     const password = getEl('password-input').value;
     if (!email || !password) { showToast("입력해주세요!"); return; }
-    const { error } = await supabase.auth.signInWithPassword({ email, password });
-    if (error) showToast("실패: " + error.message);
+    
+    // 1. 먼저 로그인을 시도합니다.
+    const { data: signInData, error: signInError } = await supabase.auth.signInWithPassword({ email, password });
+    
+    if (signInError) {
+        // 2. 만약 계정이 없다면(Invalid login credentials), 가입을 시도합니다.
+        if (signInError.message.includes("Invalid login credentials") || signInError.status === 400) {
+            console.log("[Auth] 계정이 없어 회원가입을 시도합니다.");
+            const { error: signUpError } = await supabase.auth.signUp({ email, password });
+            if (signUpError) {
+                showToast("실패: " + signUpError.message);
+                return;
+            }
+            showToast("가입 완료! 자동으로 로그인 중...");
+            // 가입 후 바로 로그인 시도
+            await supabase.auth.signInWithPassword({ email, password });
+        } else {
+            showToast("로그인 실패: " + signInError.message);
+        }
+    }
 }
 
 async function handleGoogleLogin() {

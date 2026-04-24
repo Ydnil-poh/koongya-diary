@@ -61,7 +61,24 @@ const supabase = createClient(CONFIG.SUPABASE_URL, CONFIG.SUPABASE_ANON_KEY, {
   auth: { persistSession: true, autoRefreshToken: true, detectSessionInUrl: true, storageKey: 'koongya-diary-auth' }
 });
 const genAI = new GoogleGenerativeAI(CONFIG.GEMINI_API_KEY);
-const GEMINI_MODEL = "gemini-3-flash-preview"; 
+const GEMINI_MODELS = ["gemini-3-flash-preview", "gemini-3-flash", "gemini-2.5-flash"];
+
+// [추가] 폴백(Fallback) 헬퍼 함수
+async function generateContentWithFallback(prompt) {
+    let lastError = null;
+    for (const modelName of GEMINI_MODELS) {
+        try {
+            const model = genAI.getGenerativeModel({ model: modelName });
+            const result = await model.generateContent(prompt);
+            return result; // 성공 시 즉시 반환
+        } catch (error) {
+            console.warn(`[AI 폴백] ${modelName} 호출 실패. 다음 모델 시도 중...`, error.message);
+            lastError = error;
+        }
+    }
+    // 모든 모델 실패 시 최종 에러 던지기
+    throw lastError || new Error("모든 AI 모델 호출에 실패했습니다.");
+}
 
 // ========================================== 
 // 2. 전역 상태 및 DOM 요소 선언 
@@ -325,9 +342,8 @@ async function handleSendMessage() {
             diaryContext = `[사용자의 이전 일기 요약]\n"${koongyaDataDb.diary_content}"\n이 내용을 기억하고 공감하는 뉘앙스를 조금 섞어서 대화해.\n\n`;
         }
         
-        const model = genAI.getGenerativeModel({ model: GEMINI_MODEL }); 
         const systemPrompt = `너는 ${currentKoongyaName} 쿵야야. 성격: ${KOONGYA_ORDER.find(k => k.id === currentKoongyaId).description}. [절대 규칙] 1. 이모지 금지. 2. 마크다운(**, # 등) 금지. 3. 순수 텍스트만 사용. 4. ~쿵, ~야 등 쿵야체 사용.`;
-        const result = await model.generateContent(`${systemPrompt}\n\n${diaryContext}[이전 대화]\n${chatContext}\n[현재 대화]\n사용자: "${message}"\n쿵야:`);
+        const result = await generateContentWithFallback(`${systemPrompt}\n\n${diaryContext}[이전 대화]\n${chatContext}\n[현재 대화]\n사용자: "${message}"\n쿵야:`);
         if (loadingUI) loadingUI.classList.add('hidden');
         const responseText = result.response.text();
         chatLog.innerHTML += `<div class="chat-bubble chat-bubble-ai">${responseText}</div>`;
@@ -360,11 +376,9 @@ async function generateAIInsight() {
     try {
         const { data: logs } = await supabase.from('chat_logs').select('sender, message').eq('koongya_id', currentDbId).order('created_at', { ascending: true }).limit(10);
         const chatContext = logs.map(l => `${l.sender === 'user' ? '사용자' : '쿵야'}: ${l.message}`).join("\n");
-        const model = genAI.getGenerativeModel({ model: GEMINI_MODEL });
-        
         // [버그 수정] 회고 분석용 프롬프트를 쿵야의 캐릭터성과 심리 상담 요약을 결합하여 명확하게 수정
         const systemPrompt = `너는 ${currentKoongyaName} 쿵야야. 사용자와 나눈 대화를 바탕으로, 오늘 사용자의 기분이나 주요 관심사를 따뜻하고 캐릭터다운 말투로 2~3문장으로 짧게 요약해줘. [절대 규칙] 1. 마크다운(**, # 등) 금지. 2. 순수 텍스트만 사용. 3. ~쿵, ~야 등 쿵야체 사용.`;
-        const result = await model.generateContent(`${systemPrompt}\n\n[대화 기록]\n${chatContext}`);
+        const result = await generateContentWithFallback(`${systemPrompt}\n\n[대화 기록]\n${chatContext}`);
         
         aiKeywordsContainer.innerHTML = `<div class="insight-box">${result.response.text().replace(/\n/g, '<br>')}</div>`;
     } catch (error) { 
@@ -396,9 +410,8 @@ async function processGraduation(diaryContent) {
     try {
         const { data: logs } = await supabase.from('chat_logs').select('sender, message').eq('koongya_id', currentDbId).order('created_at', { ascending: true }).limit(15);
         const chatContext = logs.map(l => `${l.sender === 'user' ? '사용자' : '쿵야'}: ${l.message}`).join("\n");
-        const model = genAI.getGenerativeModel({ model: GEMINI_MODEL });
         const prompt = `졸업 질문 1개. 마크다운 금지. 20자 이내. 대화내용: "${chatContext}"와 일기: "${diaryContent}" 참고.`;
-        const result = await model.generateContent(prompt);
+        const result = await generateContentWithFallback(prompt);
         const coreQuestion = result.response.text().replace(/"/g, '').trim();
         const imagePath = `assets/images/${currentKoongyaId}/step5.png`;
         const { error: archiveError } = await supabase.from('archives').insert([{ user_id: currentUser.id, koongya_type: currentKoongyaId, image_path: imagePath, core_question: coreQuestion, final_diary: diaryContent }]);
@@ -475,9 +488,9 @@ async function initApp() {
     getEl('retrospective-btn').onclick = openRetrospective;
     
     // [이벤트 부착] DOM 로드 즉시 확정적으로 부착하여 Supabase 인증 딜레이(타이밍 꼬임)의 영향을 받지 않도록 분리
-    const gridContainer = getEl('grid-container');
-    if (gridContainer) {
-        gridContainer.onclick = (e) => {
+    // [강력 디버깅 모드] body에 직접 이벤트를 위임하여 100% 감지되도록 보장합니다.
+    document.body.addEventListener('click', (e) => {
+        try {
             const cell = e.target.closest('.cell');
             if (!cell) return;
             
@@ -487,8 +500,11 @@ async function initApp() {
             } else {
                 openChatPanel(cell);
             }
-        };
-    }
+        } catch (err) {
+            console.error("클릭 이벤트 처리 중 치명적 에러:", err);
+            showToast("클릭 에러: " + err.message);
+        }
+    });
     
     setTimeout(() => { const welcome = getEl('welcome-message'); if (welcome) welcome.remove(); }, 8000);
     setTimeout(hideLoadingOverlay, 5000);

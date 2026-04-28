@@ -425,6 +425,7 @@ async function handleSendMessage() {
             chatInput.disabled = false;
             // 사용자가 마우스를 다시 클릭할 필요 없이 바로 타자 칠 수 있게 포커스 이동
             chatInput.focus(); 
+        }
     }
 }
 

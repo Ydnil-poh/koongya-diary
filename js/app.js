@@ -84,13 +84,13 @@ async function generateContentWithFallback(prompt) {
 // 2. 전역 상태 및 DOM 요소 선언 
 // ========================================== 
 const KOONGYA_ORDER = [
-    { id: 'onion', name: '양파', description: '맑은 눈의 광인' },
-    { id: 'riceball', name: '주먹밥', description: '안습/친절' },
-    { id: 'radish', name: '무시', description: '무심/락스타' },
-    { id: 'halfboiled', name: '반계', description: '열정/긍정' },
-    { id: 'bellpepper', name: '피망', description: '힙스터/예술가' },
-    { id: 'celery', name: '셀러리', description: '허세 매니저' },
-    { id: 'garlic', name: '마늘', description: '독설/최종 교정자' }
+    { id: 'onion', name: '양파', description: '맑은 눈의 광인. 겉으로는 엄청 해맑고 순수해 보이지만, 대화해보면 어딘가 핀트가 엇나간 광기가 느껴지는 말을 해. 앞뒤가 안 맞거나 해맑게 섬뜩한 소리를 하는 게 특징이야.' },
+    { id: 'riceball', name: '주먹밥', description: '항상 불운하고 주눅들어 있지만 남에게는 과도하게 친절하고 미안해하는 안습한 성격. "내가 그렇지 뭐...", "미안해..." 같은 자조적인 태도를 보이며 눈물이 많아. 절대로 무조건적인 긍정이나 응원을 하지 않고, 자기 신세를 한탄해.' },
+    { id: 'radish', name: '무시', description: '모든 것에 무심하고 시크한 락스타. 말수가 적고 단답형으로 툭툭 내뱉어. 상대방의 말에 크게 동요하지 않으며 열정이나 호들갑을 매우 귀찮아해.' },
+    { id: 'halfboiled', name: '반계', description: '과도하게 열정적이고 파이팅이 넘쳐! 모든 문장을 느낌표로 끝낼 정도로 에너지가 과해서 상대방을 오히려 피곤하게 만드는 스타일이야. 무조건 할 수 있다고 외쳐.' },
+    { id: 'bellpepper', name: '피망', description: '자신만의 세계가 뚜렷한 힙스터 예술가. 일상적인 대화도 예술적이고 난해한 비유를 섞어 말하며, 평범하고 진부한 생각들을 속으로 무시하는 경향이 있어.' },
+    { id: 'celery', name: '셀러리', description: '허세가 가득 찬 스타트업 대표/매니저 스타일. 자기가 세상을 다 아는 것처럼 훈수 두기를 좋아하고, 쓸데없는 비즈니스/트렌드 용어를 섞어 쓰며 잘난 척을 해.' },
+    { id: 'garlic', name: '마늘', description: '냉혹하고 뼈 때리는 독설가. 무조건적인 위로나 공감을 절대 해주지 않고, 상대방의 변명이나 나약함을 팩트 폭력으로 산산조각 내는 날카로운 지적을 해.' }
 ];
 
 let currentUser = null;
@@ -133,14 +133,22 @@ function loadGardenFromLocal() {
 
 function renderGarden(data) {
     const cells = document.querySelectorAll('.cell');
-    cells.forEach(cell => { cell.classList.add('empty'); cell.classList.remove('has-koongya'); cell.innerHTML = ''; });
+    // 모든 셀 비우기
+    cells.forEach(cell => { 
+        cell.classList.add('empty'); 
+        cell.classList.remove('has-koongya'); 
+        cell.innerHTML = '';
+        cell.removeAttribute('data-db-id');
+    });
+
     data.forEach(item => {
         const cell = document.querySelector(`.cell[data-index="${item.cell_index}"]`);
         if (cell) {
-            cell.classList.remove('empty'); cell.classList.add('has-koongya');
+            cell.classList.remove('empty'); 
+            cell.classList.add('has-koongya');
             cell.setAttribute('data-koongya-id', item.koongya_type);
+            cell.setAttribute('data-db-id', item.id); // 고유 ID 심기
             cell.setAttribute('data-step', item.current_step);
-            cell.setAttribute('data-db-id', item.id);
             cell.innerHTML = `<img src="assets/images/${item.koongya_type}/step${item.current_step}.png" class="koongya-sprite" loading="lazy">`;
         }
     });
@@ -268,28 +276,31 @@ window.plantSeed = plantSeed;
 
 async function openChatPanel(cell) {
     try {
-        currentDbId = cell.getAttribute('data-db-id');
-        currentKoongyaId = cell.getAttribute('data-koongya-id');
-        currentStep = parseInt(cell.getAttribute('data-step')) || 1;
-        
-        // [버그 수정] 새로고침 시 data-db-id가 "undefined" 텍스트로 들어가는 현상 방지
-        if (!currentDbId || currentDbId === "undefined" || currentDbId === "null") { 
+        const dbId = cell.getAttribute('data-db-id');
+        // [수정] ID가 없으면 정원을 다시 로드하고 중단
+        if (!dbId || dbId === "undefined") { 
             await loadActiveKoongyas(); 
-            showToast("정원을 최신 상태로 동기화했습니다. 다시 클릭해 주세요!");
             return; 
         }
         
+        currentDbId = dbId;
+        currentKoongyaId = cell.getAttribute('data-koongya-id');
+        currentStep = parseInt(cell.getAttribute('data-step')) || 1;
+        
         const koongyaData = KOONGYA_ORDER.find(k => k.id === currentKoongyaId);
         currentKoongyaName = koongyaData ? koongyaData.name : "쿵야";
-        updateRetroButtonVisibility().catch(e => console.error(e));
+        
         getEl('chat-koongya-name').innerText = currentKoongyaName;
         const chatLog = getEl('chat-log');
+        
+        // [수정] 대화창을 열 때 이전 데이터 잔상을 즉시 지움
         chatLog.innerHTML = "<p style='text-align:center; color:#999;'>불러오는 중...</p>"; 
+        
         await loadChatHistory(currentDbId);
+        updateRetroButtonVisibility().catch(e => console.error(e));
         getEl('chat-panel').classList.remove('hidden'); 
     } catch (err) { 
         console.error("채팅창 열기 에러:", err);
-        showToast("채팅창 열기 실패: " + (err.message || "알 수 없는 오류")); 
     }
 }
 
@@ -326,53 +337,83 @@ async function handleSendMessage() {
     const chatLog = getEl('chat-log');
     const loadingUI = getEl('chat-loading');
     const sendBtn = getEl('send-btn');
-    if (!chatInput || !chatLog) return;
+    
+    // [중요] 함수 실행 시점의 상태를 변수에 고정 (캡처)
+    const targetDbId = currentDbId; 
+    const targetKoongyaId = currentKoongyaId;
+    const targetKoongyaName = currentKoongyaName;
+    const sessionUser = currentUser;
+
+    if (!chatInput || !chatLog || !sessionUser) {
+        if (!sessionUser) showToast("로그인이 필요합니다.");
+        return;
+    }
+
     const message = chatInput.value.trim();
     if (!message) return;
+
     if (sendBtn) sendBtn.disabled = true;
-    await saveChatLog(currentDbId, 'user', message);
-    chatLog.innerHTML += `<div class="chat-bubble chat-bubble-user">${message}</div>`;
-    chatLog.scrollTop = chatLog.scrollHeight;
+
+    // 1. 유저 메시지 저장 및 화면 표시
+    await saveChatLog(targetDbId, 'user', message);
+    
+    // 현재 내가 보고 있는 쿵야와 메시지를 보낸 쿵야가 같을 때만 화면에 표시
+    if (currentDbId === targetDbId) {
+        chatLog.innerHTML += `<div class="chat-bubble chat-bubble-user">${message}</div>`;
+        chatLog.scrollTop = chatLog.scrollHeight;
+        if (loadingUI) loadingUI.classList.remove('hidden');
+    }
+    
     chatInput.value = "";
     updateRetroButtonVisibility().catch(e => console.error(e));
-    if (loadingUI) loadingUI.classList.remove('hidden');
+
     try {
-        // [수정] 이전 대화 기록 가져오기 (문맥 유지)
-        const { data: logs } = await supabase.from('chat_logs').select('sender, message').eq('koongya_id', currentDbId).order('created_at', { ascending: true }).limit(10);
+        // 2. AI 응답을 위한 컨텍스트 준비 (고정된 targetDbId 사용)
+        const { data: logs } = await supabase.from('chat_logs')
+            .select('sender, message')
+            .eq('koongya_id', targetDbId)
+            .order('created_at', { ascending: true })
+            .limit(10);
+
         let chatContext = "";
         if (logs && logs.length > 0) {
             chatContext = logs.map(l => `${l.sender === 'user' ? '사용자' : '쿵야'}: ${l.message}`).join("\n") + "\n";
         }
         
-        // [추가] 쿵야가 이전 회고록(일기)을 기억하도록 반영
-        const { data: koongyaDataDb } = await supabase.from('active_koongyas').select('diary_content').eq('id', currentDbId).single();
+        const { data: koongyaDataDb } = await supabase.from('active_koongyas')
+            .select('diary_content')
+            .eq('id', targetDbId)
+            .single();
+
         let diaryContext = "";
         if (koongyaDataDb && koongyaDataDb.diary_content) {
             diaryContext = `[사용자의 이전 일기 요약]\n"${koongyaDataDb.diary_content}"\n이 내용을 기억하고 공감하는 뉘앙스를 조금 섞어서 대화해.\n\n`;
         }
         
-        const systemPrompt = `너는 ${currentKoongyaName} 쿵야야. 성격: ${KOONGYA_ORDER.find(k => k.id === currentKoongyaId).description}. [절대 규칙] 1. 이모지 금지. 2. 마크다운(**, # 등) 금지. 3. 순수 텍스트만 사용. 4. ~쿵, ~야 등 쿵야체 사용.`;
+        const koongyaInfo = KOONGYA_ORDER.find(k => k.id === targetKoongyaId);
+        const systemPrompt = `너는 ${targetKoongyaName} 쿵야야. 성격: ${koongyaInfo.description}. [절대 규칙] 1. 이모지 금지. 2. 마크다운(**, # 등) 금지. 3. 순수 텍스트만 사용. 4. ~쿵, ~야 등 쿵야체 사용.`;
+        
+        // 3. AI 응답 생성
         const result = await generateContentWithFallback(`${systemPrompt}\n\n${diaryContext}[이전 대화]\n${chatContext}\n[현재 대화]\n사용자: "${message}"\n쿵야:`);
-        if (loadingUI) loadingUI.classList.add('hidden');
         const responseText = result.response.text();
-        chatLog.innerHTML += `<div class="chat-bubble chat-bubble-ai">${responseText}</div>`;
-        chatLog.scrollTop = chatLog.scrollHeight;
-        await saveChatLog(currentDbId, 'ai', responseText);
-    } catch (error) { 
-        if (loadingUI) loadingUI.classList.add('hidden'); 
-        if (error.message && error.message.includes("429")) {
-            showToast("AI가 잠시 생각할 시간이 필요해요. (1분 후 다시 시도해 주세요)");
-        } else {
-            showToast("에러: " + (error.message || "알 수 없는 오류"));
-        }
-    } finally { if (sendBtn) sendBtn.disabled = false; }
-}
 
-async function saveChatLog(dbId, sender, message) { 
-    const { error } = await supabase.from('chat_logs').insert([{ koongya_id: dbId, sender, message }]); 
-    if (error) {
-        console.error("채팅 저장 에러:", error);
-        showToast("채팅 저장 실패: " + error.message);
+        // 4. AI 메시지 저장 (고정된 targetDbId 사용)
+        await saveChatLog(targetDbId, 'ai', responseText);
+
+        // 5. 화면 업데이트 (여전히 해당 쿵야 창을 열어두고 있을 때만)
+        if (currentDbId === targetDbId) {
+            if (loadingUI) loadingUI.classList.add('hidden');
+            chatLog.innerHTML += `<div class="chat-bubble chat-bubble-ai">${responseText}</div>`;
+            chatLog.scrollTop = chatLog.scrollHeight;
+            updateRetroButtonVisibility().catch(e => console.error(e));
+        } else {
+            showToast(`${targetKoongyaName} 쿵야가 답장을 보냈어요!`);
+        }
+    } catch (error) { 
+        if (currentDbId === targetDbId && loadingUI) loadingUI.classList.add('hidden'); 
+        showToast("에러: " + (error.message || "알 수 없는 오류"));
+    } finally { 
+        if (sendBtn) sendBtn.disabled = false; 
     }
 }
 
@@ -385,8 +426,8 @@ async function generateAIInsight() {
     try {
         const { data: logs } = await supabase.from('chat_logs').select('sender, message').eq('koongya_id', currentDbId).order('created_at', { ascending: true }).limit(10);
         const chatContext = logs.map(l => `${l.sender === 'user' ? '사용자' : '쿵야'}: ${l.message}`).join("\n");
-        // [버그 수정] 회고 분석용 프롬프트를 쿵야의 캐릭터성과 심리 상담 요약을 결합하여 명확하게 수정
-        const systemPrompt = `너는 ${currentKoongyaName} 쿵야야. 사용자와 나눈 대화를 바탕으로, 오늘 사용자의 기분이나 주요 관심사를 따뜻하고 캐릭터다운 말투로 2~3문장으로 짧게 요약해줘. [절대 규칙] 1. 마크다운(**, # 등) 금지. 2. 순수 텍스트만 사용. 3. ~쿵, ~야 등 쿵야체 사용.`;
+        const koongyaDesc = KOONGYA_ORDER.find(k => k.id === currentKoongyaId).description;
+        const systemPrompt = `너는 ${currentKoongyaName} 쿵야야. 성격: ${koongyaDesc}\n사용자와 나눈 대화를 바탕으로, 오늘 사용자의 기분이나 대화의 핵심을 너의 성격이 100% 묻어나는 말투로 2~3문장 짧게 코멘트해줘. 무조건적인 위로 말고 캐릭터 성격에 맞는 반응을 보여줘. [절대 규칙] 1. 마크다운(**, # 등) 금지. 2. 순수 텍스트만 사용. 3. ~쿵, ~야 등 쿵야체 사용.`;
         const result = await generateContentWithFallback(`${systemPrompt}\n\n[대화 기록]\n${chatContext}`);
         
         aiKeywordsContainer.innerHTML = `<div class="insight-box">${result.response.text().replace(/\n/g, '<br>')}</div>`;
@@ -419,7 +460,8 @@ async function processGraduation(diaryContent) {
     try {
         const { data: logs } = await supabase.from('chat_logs').select('sender, message').eq('koongya_id', currentDbId).order('created_at', { ascending: true }).limit(15);
         const chatContext = logs.map(l => `${l.sender === 'user' ? '사용자' : '쿵야'}: ${l.message}`).join("\n");
-        const prompt = `졸업 질문 1개. 마크다운 금지. 20자 이내. 대화내용: "${chatContext}"와 일기: "${diaryContent}" 참고.`;
+        const koongyaDesc = KOONGYA_ORDER.find(k => k.id === currentKoongyaId).description;
+        const prompt = `너는 ${currentKoongyaName} 쿵야야. 성격: ${koongyaDesc}\n사용자가 너와 나눈 대화와 마지막으로 작성한 일기를 읽고, 사용자가 앞으로 나아가기 위해 스스로 던져봐야 할 '핵심 질문 1개'를 너의 성격이 짙게 묻어나는 말투로 20자 이내로 짧게 작성해. 절대 이모지나 마크다운 금지. 순수 텍스트만 사용. ~쿵, ~야 체 사용.\n\n[대화내용]\n"${chatContext}"\n\n[일기]\n"${diaryContent}"`;
         const result = await generateContentWithFallback(prompt);
         const coreQuestion = result.response.text().replace(/"/g, '').trim();
         const imagePath = `assets/images/${currentKoongyaId}/step5.png`;
@@ -485,6 +527,7 @@ async function initApp() {
     const bindClick = (id, fn) => { const el = getEl(id); if (el) el.onclick = fn; };
     const bindKey = (id, fn) => { const el = getEl(id); if (el) el.onkeypress = fn; };
 
+    // 버튼 이벤트 바인딩
     bindClick('email-login-btn', handleEmailLogin);
     bindClick('google-login-btn', handleGoogleLogin);
     bindClick('send-btn', handleSendMessage);
@@ -502,15 +545,11 @@ async function initApp() {
     bindKey('chat-input', (e) => { if (e.key === 'Enter') { e.preventDefault(); handleSendMessage(); } });
     bindKey('password-input', (e) => { if (e.key === 'Enter') { e.preventDefault(); handleEmailLogin(); } });
     
-    // [이벤트 부착] DOM 로드 즉시 확정적으로 부착하여 Supabase 인증 딜레이(타이밍 꼬임)의 영향을 받지 않도록 분리
-    // [강력 디버깅 모드] body에 직접 이벤트를 위임하여 100% 감지되도록 보장합니다.
+    // 정원 클릭 이벤트 위임
     document.body.addEventListener('click', (e) => {
         try {
             const cell = e.target.closest('.cell');
             if (!cell) return;
-            
-            console.log("[디버깅] 빈 셀 클릭 감지됨:", cell.getAttribute('data-index'));
-
             selectedCellIndex = cell.getAttribute('data-index');
             if (cell.classList.contains('empty')) {
                 openSeedPopup();
@@ -518,24 +557,30 @@ async function initApp() {
                 openChatPanel(cell);
             }
         } catch (err) {
-            console.error("클릭 이벤트 처리 중 치명적 에러:", err);
-            showToast("클릭 에러: " + err.message);
+            console.error("클릭 이벤트 에러:", err);
+        }
+    });
+
+    // [개선] 새로고침 시 세션 즉시 확인
+    const { data: { session } } = await supabase.auth.getSession();
+    if (session) {
+        await updateUIForAuth(session);
+    } else {
+        await updateUIForAuth(null);
+    }
+
+    // 인증 상태 변화 감지
+    supabase.auth.onAuthStateChange(async (event, session) => {
+        console.log("[Auth Event]", event);
+        if (event === 'SIGNED_IN' || event === 'INITIAL_SESSION' || event === 'TOKEN_REFRESHED') {
+            await updateUIForAuth(session);
+        } else if (event === 'SIGNED_OUT') {
+            await updateUIForAuth(null);
         }
     });
     
     setTimeout(() => { const welcome = getEl('welcome-message'); if (welcome) welcome.remove(); }, 8000);
     setTimeout(hideLoadingOverlay, 5000);
-    // [치명적 버그 수정] onAuthStateChange 내부에서 await supabase.from()을 직접 호출하면,
-    // 새로고침 시 토큰 검증 로직과 충돌하여 Supabase 클라이언트 전체가 영구적으로 멈추는(Hang) 현상이 발생합니다.
-    // 이를 방지하기 위해 setTimeout을 사용하여 자바스크립트 이벤트 루프의 실행 순서를 분리합니다.
-    supabase.auth.onAuthStateChange((event, session) => {
-        if (event === 'SIGNED_IN' || event === 'INITIAL_SESSION') {
-            setTimeout(() => { updateUIForAuth(session).catch(e => console.error("UI 업데이트 에러:", e)); }, 0);
-        }
-        else if (event === 'SIGNED_OUT') {
-            setTimeout(() => { updateUIForAuth(null).catch(e => console.error("UI 초기화 에러:", e)); }, 0);
-        }
-    });
 }
 if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', initApp);
 else initApp();

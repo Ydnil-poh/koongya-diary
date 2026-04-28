@@ -476,82 +476,120 @@ async function openRetrospective() {
 }
 
 async function processGraduation(diaryContent) {
-    showToast("쿵야의 마지막 인사를 준비 중입니다...");
+    const retroPanel = getEl('retrospective-panel');
+    showToast("🎓 쿵야가 마지막 인사를 준비하고 있어요. 잠시만 기다려주세요!");
+    
     try {
-        const { data: logs } = await supabase.from('chat_logs').select('sender, message').eq('koongya_id', currentDbId).order('created_at', { ascending: true }).limit(15);
+        // 1. AI에게 핵심 질문(졸업사) 먼저 요청 (에러 발생 시 여기서 바로 차단)
+        const { data: logs } = await supabase.from('chat_logs')
+            .select('sender, message')
+            .eq('koongya_id', currentDbId)
+            .order('created_at', { ascending: true })
+            .limit(15);
         const chatContext = logs.map(l => `${l.sender === 'user' ? '사용자' : '쿵야'}: ${l.message}`).join("\n");
         const koongyaDesc = KOONGYA_ORDER.find(k => k.id === currentKoongyaId).description;
+        
         const prompt = `너는 ${currentKoongyaName} 쿵야야. 성격: ${koongyaDesc}\n사용자가 너와 나눈 대화와 마지막으로 작성한 일기를 읽고, 사용자가 앞으로 나아가기 위해 스스로 던져봐야 할 '핵심 질문 1개'를 너의 성격이 짙게 묻어나는 말투로 20자 이내로 짧게 작성해. 절대 이모지나 마크다운 금지. 순수 텍스트만 사용. ~쿵, ~야 체 사용.\n\n[대화내용]\n"${chatContext}"\n\n[일기]\n"${diaryContent}"`;
+        
         const result = await generateContentWithFallback(prompt);
         const coreQuestion = result.response.text().replace(/"/g, '').trim();
         const imagePath = `assets/images/${currentKoongyaId}/step5.png`;
-        const { error: archiveError } = await supabase.from('archives').insert([{ user_id: currentUser.id, koongya_type: currentKoongyaId, image_path: imagePath, core_question: coreQuestion, final_diary: diaryContent }]);
+
+        // 2. 응답을 무사히 받았다면 아카이브(졸업 앨범)에 저장
+        const { error: archiveError } = await supabase.from('archives').insert([{ 
+            user_id: currentUser.id, 
+            koongya_type: currentKoongyaId, 
+            image_path: imagePath, 
+            core_question: coreQuestion, 
+            final_diary: diaryContent 
+        }]);
         if (archiveError) throw archiveError;
+
+        // 3. 정원에서 기존 쿵야 삭제
         await supabase.from('active_koongyas').delete().eq('id', currentDbId);
+
+        // [핵심 개선] 4. 모든 DB 작업이 완벽히 끝난 지금! 회고록 화면을 닫습니다.
+        if (retroPanel) retroPanel.classList.add('hidden');
+
+        // 5. 졸업 축하 모달 띄우기
         getEl('grad-koongya-img').src = imagePath;
         getEl('grad-core-question').innerText = `"${coreQuestion}"`;
         getEl('grad-date').innerText = new Date().toLocaleDateString();
         getEl('graduation-modal').classList.remove('hidden');
+
         localStorage.removeItem('cached_garden');
         await Promise.all([loadActiveKoongyas(), updateUnlockedList()]);
-    } catch (error) { showToast("졸업 실패: " + error.message); }
+        
+    } catch (error) { 
+        console.error("졸업 에러:", error);
+        // 에러 시 화면을 닫지 않고 사용자에게 안내
+        if (error.message && error.message.includes("503")) {
+            showToast("앗, 쿵야가 눈물을 닦느라 늦어지네요! (서버 지연) 10초 뒤에 다시 시도해 주세요.");
+        } else {
+            showToast("졸업 실패: " + (error.message || "알 수 없는 오류"));
+        }
+        throw error; // 에러를 던져서 버튼을 다시 활성화시킴
+    }
 }
 
 async function saveDiaryAndEvolve() {
     const saveBtn = getEl('save-diary-btn');
-    const diaryContent = getEl('diary-input').value; // 방금 작성한 '가장 최근의 회고록'
+    const diaryContent = getEl('diary-input').value; 
+    const retroPanel = getEl('retrospective-panel');
     
     if (!diaryContent) { showToast("일기를 먼저 작성해 주세요!"); return; }
     if (saveBtn) saveBtn.disabled = true;
 
-    // [안전장치] 현재 쿵야의 정보 캡처
     const targetDbId = currentDbId;
     const targetKoongyaId = currentKoongyaId;
     const targetKoongyaName = currentKoongyaName;
 
     try {
-        // 졸업(5단계)일 때는 별도의 졸업 처리 로직으로 이동
         if (currentStep === 5) {
-            getEl('retrospective-panel').classList.add('hidden');
+            // [졸업 단계] 모달이 자연스럽게 뜨도록 창을 닫지 않고 유지 (processGraduation으로 넘김)
             await processGraduation(diaryContent);
         } else {
-            showToast("쿵야가 진화하는 중..."); 
+            // [진화 단계 핵심 UX 개선] 클릭 즉시 창을 닫아서 답답함을 없앱니다!
+            if (retroPanel) retroPanel.classList.add('hidden');
+            showToast("일기 저장 완료! 쿵야가 일기를 읽으며 진화 중입니다..."); 
+            
             const nextStep = currentStep + 1;
-            
-            // 1. DB에 '가장 최근 회고록'을 덮어씌워서 업데이트
-            await supabase.from('active_koongyas')
-                .update({ current_step: nextStep, diary_content: diaryContent })
-                .eq('id', targetDbId);
-            
-            // 2. 쿵야가 방금 쓴 일기를 읽고 먼저 말 거는 로직
-            showToast("쿵야가 방금 쓰신 일기를 읽고 있어요!");
             const koongyaDesc = KOONGYA_ORDER.find(k => k.id === targetKoongyaId).description;
             
-            // [개선] 프롬프트를 더 명확하게 수정
             const prompt = `너는 ${targetKoongyaName} 쿵야야. 성격: ${koongyaDesc}
 사용자가 방금 너와의 대화를 마친 후 아래와 같은 [최신 회고록]을 남겼어. 네가 이 회고록을 몰래 읽었다고 가정해.
 
 [최신 회고록]
 "${diaryContent}"
 
-이 회고록의 핵심 내용을 네 성격에 맞게 1~2문장으로 짧게 요약하거나 코멘트하면서, 다음 단계의 대화를 네가 먼저 시작해 줘. (예: "방금 쓴 일기 봤다쿵! ~라고 생각하다니..." 같은 뉘앙스)
-절대 이모지나 마크다운 금지. 순수 텍스트만 사용. ~쿵, ~야 체 사용.`;
+이 회고록의 핵심 내용을 네 성격에 맞게 1~2문장으로 짧게 요약하거나 코멘트하면서, 다음 단계의 대화를 네가 먼저 시작해 줘. 절대 이모지나 마크다운 금지. 순수 텍스트만 사용. ~쿵, ~야 체 사용.`;
             
             const result = await generateContentWithFallback(prompt);
             const aiGreeting = result.response.text();
 
-            // 3. AI가 생성한 첫인사를 채팅 로그에 바로 저장
+            await supabase.from('active_koongyas')
+                .update({ current_step: nextStep, diary_content: diaryContent })
+                .eq('id', targetDbId);
+
             await saveChatLog(targetDbId, 'ai', aiGreeting);
 
-            showToast(`${targetKoongyaName} 쿵야가 ${nextStep}단계로 진화했습니다!`);
-            getEl('retrospective-panel').classList.add('hidden');
+            showToast(`🎉 ${targetKoongyaName} 쿵야가 ${nextStep}단계로 진화했습니다!`);
             
-            // 정원을 다시 그려서 진화한 쿵야를 보여줌
             await loadActiveKoongyas();
         }
     } catch (error) {
         console.error("진화 에러:", error);
-        showToast("진화 중 오류가 발생했어요: " + error.message);
+        
+        // [안전장치] 만약 진화(API 호출) 중 에러가 났다면, 닫았던 회고록 창을 슬며시 다시 열어줍니다.
+        if (currentStep !== 5 && retroPanel) {
+            retroPanel.classList.remove('hidden');
+        }
+
+        if (error.message && error.message.includes("503")) {
+            showToast("앗! 서버가 잠시 혼잡해요. (10초 뒤 버튼을 다시 눌러주세요)");
+        } else {
+            showToast("진화 중 오류가 발생했어요.");
+        }
     } finally { 
         if (saveBtn) saveBtn.disabled = false; 
     }

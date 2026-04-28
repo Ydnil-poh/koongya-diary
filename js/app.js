@@ -417,6 +417,14 @@ async function handleSendMessage() {
     }
 }
 
+async function saveChatLog(dbId, sender, message) { 
+    const { error } = await supabase.from('chat_logs').insert([{ koongya_id: dbId, sender, message }]); 
+    if (error) {
+        console.error("채팅 저장 에러:", error);
+        showToast("채팅 저장 실패: " + error.message);
+    }
+}
+
 async function generateAIInsight() {
     const aiKeywordsContainer = getEl('ai-keywords');
     const regenBtn = getEl('regenerate-insight-btn');

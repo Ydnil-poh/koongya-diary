@@ -499,21 +499,62 @@ async function processGraduation(diaryContent) {
 
 async function saveDiaryAndEvolve() {
     const saveBtn = getEl('save-diary-btn');
-    const diaryContent = getEl('diary-input').value;
-    if (!diaryContent) { showToast("입력해주세요!"); return; }
+    const diaryContent = getEl('diary-input').value; // 방금 작성한 '가장 최근의 회고록'
+    
+    if (!diaryContent) { showToast("일기를 먼저 작성해 주세요!"); return; }
     if (saveBtn) saveBtn.disabled = true;
+
+    // [안전장치] 현재 쿵야의 정보 캡처
+    const targetDbId = currentDbId;
+    const targetKoongyaId = currentKoongyaId;
+    const targetKoongyaName = currentKoongyaName;
+
     try {
+        // 졸업(5단계)일 때는 별도의 졸업 처리 로직으로 이동
         if (currentStep === 5) {
             getEl('retrospective-panel').classList.add('hidden');
             await processGraduation(diaryContent);
         } else {
+            showToast("쿵야가 진화하는 중..."); 
             const nextStep = currentStep + 1;
-            await supabase.from('active_koongyas').update({ current_step: nextStep, diary_content: diaryContent }).eq('id', currentDbId);
-            showToast("진화 성공!");
+            
+            // 1. DB에 '가장 최근 회고록'을 덮어씌워서 업데이트
+            await supabase.from('active_koongyas')
+                .update({ current_step: nextStep, diary_content: diaryContent })
+                .eq('id', targetDbId);
+            
+            // 2. 쿵야가 방금 쓴 일기를 읽고 먼저 말 거는 로직
+            showToast("쿵야가 방금 쓰신 일기를 읽고 있어요!");
+            const koongyaDesc = KOONGYA_ORDER.find(k => k.id === targetKoongyaId).description;
+            
+            // [개선] 프롬프트를 더 명확하게 수정
+            const prompt = `너는 ${targetKoongyaName} 쿵야야. 성격: ${koongyaDesc}
+사용자가 방금 너와의 대화를 마친 후 아래와 같은 [최신 회고록]을 남겼어. 네가 이 회고록을 몰래 읽었다고 가정해.
+
+[최신 회고록]
+"${diaryContent}"
+
+이 회고록의 핵심 내용을 네 성격에 맞게 1~2문장으로 짧게 요약하거나 코멘트하면서, 다음 단계의 대화를 네가 먼저 시작해 줘. (예: "방금 쓴 일기 봤다쿵! ~라고 생각하다니..." 같은 뉘앙스)
+절대 이모지나 마크다운 금지. 순수 텍스트만 사용. ~쿵, ~야 체 사용.`;
+            
+            const result = await generateContentWithFallback(prompt);
+            const aiGreeting = result.response.text();
+
+            // 3. AI가 생성한 첫인사를 채팅 로그에 바로 저장
+            await saveChatLog(targetDbId, 'ai', aiGreeting);
+
+            showToast(`${targetKoongyaName} 쿵야가 ${nextStep}단계로 진화했습니다!`);
             getEl('retrospective-panel').classList.add('hidden');
+            
+            // 정원을 다시 그려서 진화한 쿵야를 보여줌
             await loadActiveKoongyas();
         }
-    } finally { if (saveBtn) saveBtn.disabled = false; }
+    } catch (error) {
+        console.error("진화 에러:", error);
+        showToast("진화 중 오류가 발생했어요: " + error.message);
+    } finally { 
+        if (saveBtn) saveBtn.disabled = false; 
+    }
 }
 
 async function loadArchives() {

@@ -61,7 +61,7 @@ const supabase = createClient(CONFIG.SUPABASE_URL, CONFIG.SUPABASE_ANON_KEY, {
   auth: { persistSession: true, autoRefreshToken: true, detectSessionInUrl: true, storageKey: 'koongya-diary-auth' }
 });
 const genAI = new GoogleGenerativeAI(CONFIG.GEMINI_API_KEY);
-const GEMINI_MODELS = ["gemini-3-flash-preview", "gemini-3-flash", "gemini-2.5-flash"];
+const GEMINI_MODELS = ["gemini-3-flash-preview", "gemini-3.1-flash-lite-preview", "gemini-2.5-flash"];
 
 // [추가] 폴백(Fallback) 헬퍼 함수
 async function generateContentWithFallback(prompt) {
@@ -74,9 +74,14 @@ async function generateContentWithFallback(prompt) {
         } catch (error) {
             console.warn(`[AI 폴백] ${modelName} 호출 실패. 다음 모델 시도 중...`, error.message);
             lastError = error;
+
+// [핵심 개선] 한도 초과(429) 에러면 다른 모델을 찔러도 어차피 실패하므로 즉시 중단
+            if (error.status === 429 || error.message.includes("429") || error.message.includes("quota")) {
+                console.warn("[System] API 요청 한도 초과. 폴백을 중단합니다.");
+                break; 
+            }
         }
     }
-    // 모든 모델 실패 시 최종 에러 던지기
     throw lastError || new Error("모든 AI 모델 호출에 실패했습니다.");
 }
 
@@ -353,6 +358,7 @@ async function handleSendMessage() {
     if (!message) return;
 
     if (sendBtn) sendBtn.disabled = true;
+    if (chatInput) chatInput.disabled = true;
 
     // 1. 유저 메시지 저장 및 화면 표시
     await saveChatLog(targetDbId, 'user', message);
@@ -413,7 +419,12 @@ async function handleSendMessage() {
         if (currentDbId === targetDbId && loadingUI) loadingUI.classList.add('hidden'); 
         showToast("에러: " + (error.message || "알 수 없는 오류"));
     } finally { 
+        // [개선 2] 응답이 끝나면 버튼과 입력창을 다시 열어줌
         if (sendBtn) sendBtn.disabled = false; 
+        if (chatInput) {
+            chatInput.disabled = false;
+            // 사용자가 마우스를 다시 클릭할 필요 없이 바로 타자 칠 수 있게 포커스 이동
+            chatInput.focus(); 
     }
 }
 

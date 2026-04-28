@@ -16,6 +16,37 @@ let currentDbId = null;
 let currentKoongyaId = null;
 let currentStep = 1;
 let currentKoongyaName = '';
+let insightCache = { koongyaId: null, content: null };
+
+const AI_LIMITS = {
+  CHAT_HISTORY_LIMIT: 6,
+  RETRO_HISTORY_LIMIT: 6,
+  GRAD_HISTORY_LIMIT: 8,
+  MAX_MESSAGE_CHARS: 280,
+  MAX_DIARY_CHARS: 500
+};
+
+function clipText(value, maxChars) {
+  if (!value) return '';
+  return value.length > maxChars ? `${value.slice(0, maxChars)}…` : value;
+}
+
+function buildChatContext(logs) {
+  if (!logs || logs.length === 0) return '';
+  return logs
+    .map((log) => `${log.sender === 'user' ? '사용자' : '쿵야'}: ${clipText(log.message, AI_LIMITS.MAX_MESSAGE_CHARS)}`)
+    .join('\n');
+}
+
+function buildPersonaGuide(koongyaName, koongyaDescription) {
+  return `너는 ${koongyaName} 쿵야야. 성격 특징은 "${koongyaDescription}".
+[대화 목표]
+1) 사용자의 짧은 생각을 한 단계 확장해 긴 글감으로 발전시키는 데 도움을 줘.
+2) 답변 끝에 생각을 확장할 수 있는 구체 질문 1개를 반드시 던져줘.
+3) 캐릭터 말투는 은은하게 유지하되, 과장된 역할극은 피하고 코칭/피드백 품질을 우선해.
+[형식 규칙]
+- 마크다운 기호(**, #)는 쓰지 말고 순수 텍스트로 작성해.`;
+}
 
 async function updateUnlockedList() {
   if (!currentUser) return;
@@ -223,13 +254,14 @@ async function handleSendMessage() {
     return;
   }
 
-  const message = chatInput.value.trim();
+  const message = clipText(chatInput.value.trim(), AI_LIMITS.MAX_MESSAGE_CHARS);
   if (!message) return;
 
   if (sendBtn) sendBtn.disabled = true;
   if (chatInput) chatInput.disabled = true;
 
   await saveChatLog(targetDbId, 'user', message);
+  insightCache = { koongyaId: null, content: null };
 
   if (currentDbId === targetDbId) {
     chatLog.innerHTML += `<div class="chat-bubble chat-bubble-user">${message}</div>`;
@@ -245,25 +277,21 @@ async function handleSendMessage() {
       .from('chat_logs')
       .select('sender, message')
       .eq('koongya_id', targetDbId)
-      .order('created_at', { ascending: true })
-      .limit(10);
-
-    let chatContext = '';
-    if (logs && logs.length > 0) {
-      chatContext = logs.map((l) => `${l.sender === 'user' ? '사용자' : '쿵야'}: ${l.message}`).join('\n') + '\n';
-    }
+      .order('created_at', { ascending: false })
+      .limit(AI_LIMITS.CHAT_HISTORY_LIMIT);
+    const chatContext = buildChatContext((logs || []).reverse());
 
     const { data: koongyaDataDb } = await supabase.from('active_koongyas').select('diary_content').eq('id', targetDbId).single();
 
     let diaryContext = '';
     if (koongyaDataDb && koongyaDataDb.diary_content) {
-      diaryContext = `[사용자의 이전 일기 요약]\n"${koongyaDataDb.diary_content}"\n이 내용을 기억하고 공감하는 뉘앙스를 조금 섞어서 대화해.\n\n`;
+      diaryContext = `[사용자의 이전 일기 요약]\n"${clipText(koongyaDataDb.diary_content, AI_LIMITS.MAX_DIARY_CHARS)}"\n이 내용을 기억하고 공감하는 뉘앙스를 조금 섞어서 대화해.\n\n`;
     }
 
     const koongyaInfo = KOONGYA_ORDER.find((k) => k.id === targetKoongyaId);
-    const systemPrompt = `너는 ${targetKoongyaName} 쿵야야. 성격: ${koongyaInfo.description}. [절대 규칙] 1. 이모지 금지. 2. 마크다운(**, # 등) 금지. 3. 순수 텍스트만 사용. 4. ~쿵, ~야 등 쿵야체 사용.`;
+    const systemPrompt = buildPersonaGuide(targetKoongyaName, koongyaInfo.description);
 
-    const result = await generateContentWithFallback(`${systemPrompt}\n\n${diaryContext}[이전 대화]\n${chatContext}\n[현재 대화]\n사용자: "${message}"\n쿵야:`);
+    const result = await generateContentWithFallback(`${systemPrompt}\n\n${diaryContext}[최근 대화]\n${chatContext}\n[현재 대화]\n사용자: "${message}"\n쿵야:`);
     const responseText = result.response.text();
 
     await saveChatLog(targetDbId, 'ai', responseText);
@@ -301,15 +329,27 @@ async function generateAIInsight() {
   const regenBtn = getEl('regenerate-insight-btn');
   if (!aiKeywordsContainer) return;
   if (regenBtn) regenBtn.disabled = true;
+  if (insightCache.koongyaId === currentDbId && insightCache.content) {
+    aiKeywordsContainer.innerHTML = `<div class="insight-box">${insightCache.content.replace(/\n/g, '<br>')}</div>`;
+    return;
+  }
   aiKeywordsContainer.innerHTML = '<p>분석 중...</p>';
   try {
-    const { data: logs } = await supabase.from('chat_logs').select('sender, message').eq('koongya_id', currentDbId).order('created_at', { ascending: true }).limit(10);
-    const chatContext = logs.map((l) => `${l.sender === 'user' ? '사용자' : '쿵야'}: ${l.message}`).join('\n');
+    const { data: logs } = await supabase
+      .from('chat_logs')
+      .select('sender, message')
+      .eq('koongya_id', currentDbId)
+      .order('created_at', { ascending: false })
+      .limit(AI_LIMITS.RETRO_HISTORY_LIMIT);
+    const chatContext = buildChatContext((logs || []).reverse());
     const koongyaDesc = KOONGYA_ORDER.find((k) => k.id === currentKoongyaId).description;
-    const systemPrompt = `너는 ${currentKoongyaName} 쿵야야. 성격: ${koongyaDesc}\n사용자와 나눈 대화를 바탕으로, 오늘 사용자의 기분이나 대화의 핵심을 너의 성격이 100% 묻어나는 말투로 2~3문장 짧게 코멘트해줘. 무조건적인 위로 말고 캐릭터 성격에 맞는 반응을 보여줘. [절대 규칙] 1. 마크다운(**, # 등) 금지. 2. 순수 텍스트만 사용. 3. ~쿵, ~야 등 쿵야체 사용.`;
-    const result = await generateContentWithFallback(`${systemPrompt}\n\n[대화 기록]\n${chatContext}`);
-
-    aiKeywordsContainer.innerHTML = `<div class="insight-box">${result.response.text().replace(/\n/g, '<br>')}</div>`;
+    const systemPrompt = buildPersonaGuide(currentKoongyaName, koongyaDesc);
+    const result = await generateContentWithFallback(
+      `${systemPrompt}\n\n[대화 기록]\n${chatContext}\n\n[요청]\n대화를 바탕으로 2~3문장 코멘트 + 글감을 확장할 질문 1개를 제시해줘.`
+    );
+    const insightText = result.response.text();
+    insightCache = { koongyaId: currentDbId, content: insightText };
+    aiKeywordsContainer.innerHTML = `<div class="insight-box">${insightText.replace(/\n/g, '<br>')}</div>`;
   } catch (error) {
     console.error('AI 회고 분석 에러:', error);
     if (error.message && error.message.includes('429')) {
@@ -341,11 +381,17 @@ async function processGraduation(diaryContent) {
   showToast('🎓 쿵야가 마지막 인사를 준비하고 있어요. 잠시만 기다려주세요!');
 
   try {
-    const { data: logs } = await supabase.from('chat_logs').select('sender, message').eq('koongya_id', currentDbId).order('created_at', { ascending: true }).limit(15);
-    const chatContext = logs.map((l) => `${l.sender === 'user' ? '사용자' : '쿵야'}: ${l.message}`).join('\n');
+    const { data: logs } = await supabase
+      .from('chat_logs')
+      .select('sender, message')
+      .eq('koongya_id', currentDbId)
+      .order('created_at', { ascending: false })
+      .limit(AI_LIMITS.GRAD_HISTORY_LIMIT);
+    const chatContext = buildChatContext((logs || []).reverse());
     const koongyaDesc = KOONGYA_ORDER.find((k) => k.id === currentKoongyaId).description;
+    const safeDiary = clipText(diaryContent, AI_LIMITS.MAX_DIARY_CHARS);
 
-    const prompt = `너는 ${currentKoongyaName} 쿵야야. 성격: ${koongyaDesc}\n사용자가 너와 나눈 대화와 마지막으로 작성한 일기를 읽고, 사용자가 앞으로 나아가기 위해 스스로 던져봐야 할 '핵심 질문 1개'를 너의 성격이 짙게 묻어나는 말투로 20자 이내로 짧게 작성해. 절대 이모지나 마크다운 금지. 순수 텍스트만 사용. ~쿵, ~야 체 사용.\n\n[대화내용]\n"${chatContext}"\n\n[일기]\n"${diaryContent}"`;
+    const prompt = `${buildPersonaGuide(currentKoongyaName, koongyaDesc)}\n사용자가 너와 나눈 최근 대화와 마지막 일기를 바탕으로, 다음 글을 더 길고 깊게 쓸 수 있게 돕는 '핵심 확장 질문 1개'를 30자 이내로 작성해.\n\n[최근 대화내용]\n"${chatContext}"\n\n[일기]\n"${safeDiary}"`;
 
     const result = await generateContentWithFallback(prompt);
     const coreQuestion = result.response.text().replace(/"/g, '').trim();
@@ -378,7 +424,7 @@ async function processGraduation(diaryContent) {
 
 async function saveDiaryAndEvolve() {
   const saveBtn = getEl('save-diary-btn');
-  const diaryContent = getEl('diary-input').value;
+  const diaryContent = clipText(getEl('diary-input').value, 2000);
   const retroPanel = getEl('retrospective-panel');
 
   if (!diaryContent) {
@@ -401,13 +447,13 @@ async function saveDiaryAndEvolve() {
       const nextStep = currentStep + 1;
       const koongyaDesc = KOONGYA_ORDER.find((k) => k.id === targetKoongyaId).description;
 
-      const prompt = `너는 ${targetKoongyaName} 쿵야야. 성격: ${koongyaDesc}
-사용자가 방금 너와의 대화를 마친 후 아래와 같은 [최신 회고록]을 남겼어. 네가 이 회고록을 몰래 읽었다고 가정해.
+      const prompt = `${buildPersonaGuide(targetKoongyaName, koongyaDesc)}
+사용자가 방금 너와의 대화를 마친 후 아래와 같은 [최신 회고록]을 남겼어.
 
 [최신 회고록]
-"${diaryContent}"
+"${clipText(diaryContent, AI_LIMITS.MAX_DIARY_CHARS)}"
 
-이 회고록의 핵심 내용을 네 성격에 맞게 1~2문장으로 짧게 요약하거나 코멘트하면서, 다음 단계의 대화를 네가 먼저 시작해 줘. 절대 이모지나 마크다운 금지. 순수 텍스트만 사용. ~쿵, ~야 체 사용.`;
+이 회고록의 핵심을 1~2문장으로 코멘트하고, 다음 회고를 더 길게 쓸 수 있도록 생각 확장 질문 1개를 함께 제시해 줘.`;
 
       const result = await generateContentWithFallback(prompt);
       const aiGreeting = result.response.text();
@@ -415,6 +461,7 @@ async function saveDiaryAndEvolve() {
       await supabase.from('active_koongyas').update({ current_step: nextStep, diary_content: diaryContent }).eq('id', targetDbId);
 
       await saveChatLog(targetDbId, 'ai', aiGreeting);
+      insightCache = { koongyaId: null, content: null };
 
       showToast(`🎉 ${targetKoongyaName} 쿵야가 ${nextStep}단계로 진화했습니다!`);
 
@@ -491,7 +538,10 @@ async function initApp() {
     const p = getEl('retrospective-panel');
     if (p) p.classList.add('hidden');
   });
-  bindClick('regenerate-insight-btn', generateAIInsight);
+  bindClick('regenerate-insight-btn', () => {
+    insightCache = { koongyaId: null, content: null };
+    generateAIInsight();
+  });
   bindClick('close-graduation-modal', () => {
     const m = getEl('graduation-modal');
     if (m) m.classList.add('hidden');

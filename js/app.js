@@ -18,6 +18,9 @@ let currentStep = 1;
 let currentKoongyaName = '';
 let insightCache = { koongyaId: null, content: null };
 let aiCooldownTimer = null;
+let lastCooldownToastAt = 0;
+const COOLDOWN_TOAST_INTERVAL_MS = 10 * 1000;
+let insightGenerationInFlight = false;
 
 const AI_LIMITS = {
   CHAT_HISTORY_LIMIT: 6,
@@ -55,6 +58,7 @@ function parseCooldownSeconds(error) {
   return match ? parseInt(match[1], 10) : 0;
 }
 
+
 function syncAICooldownUI() {
   const remaining = Math.ceil(getAiCooldownRemainingMs() / 1000);
   const sendBtn = getEl('send-btn');
@@ -65,11 +69,44 @@ function syncAICooldownUI() {
   [sendBtn, retroBtn, regenBtn, saveBtn].forEach((btn) => {
     if (btn) btn.disabled = disabled;
   });
-  if (disabled) showToast(`AI 요청 대기 중이에요. ${remaining}초 후 다시 시도해 주세요.`);
+  const now = Date.now();
+  if (disabled && now - lastCooldownToastAt >= COOLDOWN_TOAST_INTERVAL_MS) {
+    showToast(`AI 요청 대기 중이에요. ${remaining}초 후 다시 시도해 주세요.`);
+    lastCooldownToastAt = now;
+  }
   if (aiCooldownTimer) clearTimeout(aiCooldownTimer);
   if (disabled) aiCooldownTimer = setTimeout(syncAICooldownUI, 1000);
+  if (!disabled) lastCooldownToastAt = 0;
 }
 
+
+function appendChatBubble(chatLog, text, role, options = {}) {
+  if (!chatLog) return null;
+  const bubble = document.createElement('div');
+  bubble.className = `chat-bubble ${role === 'user' ? 'chat-bubble-user' : 'chat-bubble-ai'}`;
+  bubble.textContent = text;
+  if (options.pendingAiReply) bubble.dataset.pendingAiReply = 'true';
+  if (options.failedAiReply) bubble.classList.add('chat-bubble-user-failed');
+  if (options.statusText) {
+    const status = document.createElement('div');
+    status.className = 'chat-bubble-status';
+    status.textContent = options.statusText;
+    bubble.appendChild(status);
+  }
+  chatLog.appendChild(bubble);
+  chatLog.scrollTop = chatLog.scrollHeight;
+  return bubble;
+}
+
+function markUserBubbleAiReplyFailed(bubble) {
+  if (!bubble || bubble.dataset.pendingAiReply !== 'true') return;
+  bubble.dataset.pendingAiReply = 'false';
+  bubble.classList.add('chat-bubble-user-failed');
+  const status = document.createElement('div');
+  status.className = 'chat-bubble-status';
+  status.textContent = '전송 완료 · 답변 생성 실패 (재전송 불필요)';
+  bubble.appendChild(status);
+}
 async function updateUnlockedList() {
   if (!currentUser) return;
   try {
@@ -253,8 +290,7 @@ async function loadChatHistory(dbId) {
   if (data) {
     chatLog.innerHTML = '';
     data.forEach((log) => {
-      const bubbleClass = log.sender === 'user' ? 'chat-bubble-user' : 'chat-bubble-ai';
-      chatLog.innerHTML += `<div class="chat-bubble ${bubbleClass}">${log.message}</div>`;
+      appendChatBubble(chatLog, log.message, log.sender === 'user' ? 'user' : 'ai');
     });
     chatLog.scrollTop = chatLog.scrollHeight;
   }
@@ -289,9 +325,9 @@ async function handleSendMessage() {
   await saveChatLog(targetDbId, 'user', message);
   insightCache = { koongyaId: null, content: null };
 
+  let pendingUserBubble = null;
   if (currentDbId === targetDbId) {
-    chatLog.innerHTML += `<div class="chat-bubble chat-bubble-user">${message}</div>`;
-    chatLog.scrollTop = chatLog.scrollHeight;
+    pendingUserBubble = appendChatBubble(chatLog, message, 'user', { pendingAiReply: true });
     if (loadingUI) loadingUI.classList.remove('hidden');
   }
 
@@ -323,9 +359,9 @@ async function handleSendMessage() {
     await saveChatLog(targetDbId, 'ai', responseText);
 
     if (currentDbId === targetDbId) {
+      if (pendingUserBubble) pendingUserBubble.dataset.pendingAiReply = 'false';
       if (loadingUI) loadingUI.classList.add('hidden');
-      chatLog.innerHTML += `<div class="chat-bubble chat-bubble-ai">${responseText}</div>`;
-      chatLog.scrollTop = chatLog.scrollHeight;
+      appendChatBubble(chatLog, responseText, 'ai');
       updateRetroButtonVisibility().catch((e) => console.error(e));
     } else {
       showToast(`${targetKoongyaName} 쿵야가 답장을 보냈어요!`);
@@ -333,7 +369,8 @@ async function handleSendMessage() {
   } catch (error) {
     if (parseCooldownSeconds(error) > 0) syncAICooldownUI();
     if (currentDbId === targetDbId && loadingUI) loadingUI.classList.add('hidden');
-    showToast('에러: ' + (error.message || '알 수 없는 오류'));
+    markUserBubbleAiReplyFailed(pendingUserBubble);
+    showToast('메시지는 저장되었어요. 재전송 없이 새 메시지를 보내거나 잠시 후 다시 시도해 주세요.');
   } finally {
     if (sendBtn) sendBtn.disabled = false;
     if (chatInput) {
@@ -352,6 +389,7 @@ async function saveChatLog(dbId, sender, message) {
 }
 
 async function generateAIInsight() {
+  if (insightGenerationInFlight) return;
   if (getAiCooldownRemainingMs() > 0) {
     syncAICooldownUI();
     return;
@@ -359,6 +397,7 @@ async function generateAIInsight() {
   const aiKeywordsContainer = getEl('ai-keywords');
   const regenBtn = getEl('regenerate-insight-btn');
   if (!aiKeywordsContainer) return;
+  insightGenerationInFlight = true;
   if (regenBtn) regenBtn.disabled = true;
   if (insightCache.koongyaId === currentDbId && insightCache.content) {
     aiKeywordsContainer.innerHTML = `<div class="insight-box">${insightCache.content.replace(/\n/g, '<br>')}</div>`;
@@ -385,11 +424,12 @@ async function generateAIInsight() {
     if (parseCooldownSeconds(error) > 0) syncAICooldownUI();
     console.error('AI 회고 분석 에러:', error);
     if (error.message && error.message.includes('429')) {
-      aiKeywordsContainer.innerHTML = '<p>분석 실패: AI가 잠시 생각할 시간이 필요해요 (1분 후 다시 시도해 주세요).</p>';
+      aiKeywordsContainer.innerHTML = '<p>분석 실패: AI가 잠시 생각할 시간이 필요해요. 잠시 후 다시 시도해 주세요.</p>';
     } else {
-      aiKeywordsContainer.innerHTML = '<p>분석 실패: ' + (error.message || '오류') + '</p>';
+      aiKeywordsContainer.innerHTML = '<p>분석 실패: 요청 처리에 실패했어요. 잠시 후 다시 시도해 주세요.</p>';
     }
   } finally {
+    insightGenerationInFlight = false;
     if (regenBtn) regenBtn.disabled = false;
   }
 }
@@ -449,7 +489,7 @@ async function processGraduation(diaryContent) {
     if (error.message && error.message.includes('503')) {
       showToast('앗, 쿵야가 눈물을 닦느라 늦어지네요! (서버 지연) 10초 뒤에 다시 시도해 주세요.');
     } else {
-      showToast('졸업 실패: ' + (error.message || '알 수 없는 오류'));
+      showToast('졸업 실패: 요청 처리에 실패했어요. 잠시 후 다시 시도해 주세요.');
     }
     throw error;
   }

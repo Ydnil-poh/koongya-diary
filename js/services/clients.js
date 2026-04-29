@@ -109,6 +109,7 @@ async function getAvailableModelNames() {
 }
 
 export async function generateContentWithFallback(prompt) {
+  // 요청 큐를 저장/재전송하지 않습니다. 각 호출은 즉시 실행되고, 429면 즉시 종료합니다.
   const cooldownMs = getAiCooldownRemainingMs();
   if (cooldownMs > 0) {
     throw new Error(`AI_COOLDOWN:${Math.ceil(cooldownMs / 1000)}`);

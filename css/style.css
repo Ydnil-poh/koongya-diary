@@ -338,6 +338,17 @@ body {
     border-top-left-radius: 4px;
 }
 
+
+.chat-bubble-user-failed {
+    background-color: #b8b8b8;
+}
+
+.chat-bubble-status {
+    margin-top: 6px;
+    font-size: 0.78rem;
+    opacity: 0.9;
+}
+
 .chat-input-area {
     display: flex;
     gap: 10px;

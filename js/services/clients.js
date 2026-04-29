@@ -1,7 +1,8 @@
 import { createClient } from 'https://cdn.jsdelivr.net/npm/@supabase/supabase-js/+esm';
-import { GoogleGenerativeAI } from 'https://esm.run/@google/generative-ai';
+import { GoogleGenAI } from 'https://esm.run/@google/genai';
 
-const GEMINI_MODELS = ['gemini-3-flash-preview', 'gemini-3.1-flash-lite-preview', 'gemini-2.5-flash'];
+const AI_COOLDOWN_UNTIL_KEY = 'koongya_ai_cooldown_until';
+const DEFAULT_MODEL_CANDIDATES = ['gemini-3-flash-preview', 'gemini-3.1-flash-lite-preview', 'gemini-2.5-flash'];
 
 let CONFIG = {
   SUPABASE_URL: '',
@@ -63,22 +64,73 @@ export const supabase = createClient(CONFIG.SUPABASE_URL, CONFIG.SUPABASE_ANON_K
   auth: { persistSession: true, autoRefreshToken: true, detectSessionInUrl: true, storageKey: 'koongya-diary-auth' }
 });
 
-const genAI = new GoogleGenerativeAI(CONFIG.GEMINI_API_KEY);
+const genAI = new GoogleGenAI({ apiKey: CONFIG.GEMINI_API_KEY });
+
+let cachedModelNames = null;
+let modelCacheAt = 0;
+const MODEL_CACHE_TTL_MS = 10 * 60 * 1000;
+
+function parseRetryDelayMs(error) {
+  const raw = error?.message || '';
+  const secMatch = raw.match(/retry in\s+([\d.]+)s/i) || raw.match(/retryDelay":"(\d+)s/i);
+  if (secMatch) return Math.max(1000, Math.ceil(parseFloat(secMatch[1]) * 1000));
+  return null;
+}
+
+function setAiCooldown(ms) {
+  const until = Date.now() + ms;
+  localStorage.setItem(AI_COOLDOWN_UNTIL_KEY, String(until));
+  return until;
+}
+
+export function getAiCooldownRemainingMs() {
+  const until = Number(localStorage.getItem(AI_COOLDOWN_UNTIL_KEY) || 0);
+  return Math.max(0, until - Date.now());
+}
+
+async function getAvailableModelNames() {
+  if (cachedModelNames && Date.now() - modelCacheAt < MODEL_CACHE_TTL_MS) return cachedModelNames;
+  try {
+    const models = await genAI.models.list();
+    const names = [];
+    for await (const model of models) {
+      if (model.supportedActions && model.supportedActions.includes('generateContent')) {
+        names.push(model.name.replace('models/', ''));
+      }
+    }
+    cachedModelNames = names.length ? names : DEFAULT_MODEL_CANDIDATES;
+    modelCacheAt = Date.now();
+    return cachedModelNames;
+  } catch (e) {
+    cachedModelNames = DEFAULT_MODEL_CANDIDATES;
+    modelCacheAt = Date.now();
+    return cachedModelNames;
+  }
+}
 
 export async function generateContentWithFallback(prompt) {
+  const cooldownMs = getAiCooldownRemainingMs();
+  if (cooldownMs > 0) {
+    throw new Error(`AI_COOLDOWN:${Math.ceil(cooldownMs / 1000)}`);
+  }
+
+  const modelNames = await getAvailableModelNames();
   let lastError = null;
-  for (const modelName of GEMINI_MODELS) {
+  for (const modelName of modelNames) {
     try {
-      const model = genAI.getGenerativeModel({ model: modelName });
-      const result = await model.generateContent(prompt);
-      return result;
+      const result = await genAI.models.generateContent({ model: modelName, contents: prompt });
+      return { response: { text: () => result.text || '' } };
     } catch (error) {
       console.warn(`[AI 폴백] ${modelName} 호출 실패. 다음 모델 시도 중...`, error.message);
       lastError = error;
 
       if (error.status === 429 || error.message.includes('429') || error.message.includes('quota')) {
         console.warn('[System] API 요청 한도 초과. 폴백을 중단합니다.');
-        break;
+        const retryMs = parseRetryDelayMs(error) || 60 * 1000;
+        const until = setAiCooldown(retryMs);
+        const cooldownError = new Error(`AI_COOLDOWN:${Math.ceil((until - Date.now()) / 1000)}`);
+        cooldownError.cause = error;
+        throw cooldownError;
       }
     }
   }

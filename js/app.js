@@ -1,5 +1,5 @@
 import { KOONGYA_ORDER } from './data/koongyas.js';
-import { supabase, generateContentWithFallback } from './services/clients.js';
+import { supabase, generateContentWithFallback, getAiCooldownRemainingMs } from './services/clients.js';
 import {
   getEl,
   showToast,
@@ -17,6 +17,7 @@ let currentKoongyaId = null;
 let currentStep = 1;
 let currentKoongyaName = '';
 let insightCache = { koongyaId: null, content: null };
+let aiCooldownTimer = null;
 
 const AI_LIMITS = {
   CHAT_HISTORY_LIMIT: 6,
@@ -46,6 +47,27 @@ function buildPersonaGuide(koongyaName, koongyaDescription) {
 3) 캐릭터 말투는 은은하게 유지하되, 과장된 역할극은 피하고 코칭/피드백 품질을 우선해.
 [형식 규칙]
 - 마크다운 기호(**, #)는 쓰지 말고 순수 텍스트로 작성해.`;
+}
+
+function parseCooldownSeconds(error) {
+  if (!error?.message) return 0;
+  const match = error.message.match(/AI_COOLDOWN:(\d+)/);
+  return match ? parseInt(match[1], 10) : 0;
+}
+
+function syncAICooldownUI() {
+  const remaining = Math.ceil(getAiCooldownRemainingMs() / 1000);
+  const sendBtn = getEl('send-btn');
+  const retroBtn = getEl('retrospective-btn');
+  const regenBtn = getEl('regenerate-insight-btn');
+  const saveBtn = getEl('save-diary-btn');
+  const disabled = remaining > 0;
+  [sendBtn, retroBtn, regenBtn, saveBtn].forEach((btn) => {
+    if (btn) btn.disabled = disabled;
+  });
+  if (disabled) showToast(`AI 요청 대기 중이에요. ${remaining}초 후 다시 시도해 주세요.`);
+  if (aiCooldownTimer) clearTimeout(aiCooldownTimer);
+  if (disabled) aiCooldownTimer = setTimeout(syncAICooldownUI, 1000);
 }
 
 async function updateUnlockedList() {
@@ -239,6 +261,10 @@ async function loadChatHistory(dbId) {
 }
 
 async function handleSendMessage() {
+  if (getAiCooldownRemainingMs() > 0) {
+    syncAICooldownUI();
+    return;
+  }
   const chatInput = getEl('chat-input');
   const chatLog = getEl('chat-log');
   const loadingUI = getEl('chat-loading');
@@ -305,6 +331,7 @@ async function handleSendMessage() {
       showToast(`${targetKoongyaName} 쿵야가 답장을 보냈어요!`);
     }
   } catch (error) {
+    if (parseCooldownSeconds(error) > 0) syncAICooldownUI();
     if (currentDbId === targetDbId && loadingUI) loadingUI.classList.add('hidden');
     showToast('에러: ' + (error.message || '알 수 없는 오류'));
   } finally {
@@ -325,6 +352,10 @@ async function saveChatLog(dbId, sender, message) {
 }
 
 async function generateAIInsight() {
+  if (getAiCooldownRemainingMs() > 0) {
+    syncAICooldownUI();
+    return;
+  }
   const aiKeywordsContainer = getEl('ai-keywords');
   const regenBtn = getEl('regenerate-insight-btn');
   if (!aiKeywordsContainer) return;
@@ -351,6 +382,7 @@ async function generateAIInsight() {
     insightCache = { koongyaId: currentDbId, content: insightText };
     aiKeywordsContainer.innerHTML = `<div class="insight-box">${insightText.replace(/\n/g, '<br>')}</div>`;
   } catch (error) {
+    if (parseCooldownSeconds(error) > 0) syncAICooldownUI();
     console.error('AI 회고 분석 에러:', error);
     if (error.message && error.message.includes('429')) {
       aiKeywordsContainer.innerHTML = '<p>분석 실패: AI가 잠시 생각할 시간이 필요해요 (1분 후 다시 시도해 주세요).</p>';
@@ -412,6 +444,7 @@ async function processGraduation(diaryContent) {
     localStorage.removeItem('cached_garden');
     await Promise.all([loadActiveKoongyas(), updateUnlockedList()]);
   } catch (error) {
+    if (parseCooldownSeconds(error) > 0) syncAICooldownUI();
     console.error('졸업 에러:', error);
     if (error.message && error.message.includes('503')) {
       showToast('앗, 쿵야가 눈물을 닦느라 늦어지네요! (서버 지연) 10초 뒤에 다시 시도해 주세요.');
@@ -423,6 +456,10 @@ async function processGraduation(diaryContent) {
 }
 
 async function saveDiaryAndEvolve() {
+  if (getAiCooldownRemainingMs() > 0) {
+    syncAICooldownUI();
+    return;
+  }
   const saveBtn = getEl('save-diary-btn');
   const diaryContent = clipText(getEl('diary-input').value, 2000);
   const retroPanel = getEl('retrospective-panel');
@@ -481,6 +518,7 @@ async function saveDiaryAndEvolve() {
     }
   } finally {
     if (saveBtn) saveBtn.disabled = false;
+    if (getAiCooldownRemainingMs() > 0) syncAICooldownUI();
   }
 }
 
@@ -573,6 +611,7 @@ async function initApp() {
       handleSendMessage();
     }
   });
+  syncAICooldownUI();
   bindKey('password-input', (e) => {
     if (e.key === 'Enter') {
       e.preventDefault();

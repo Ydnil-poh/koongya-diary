@@ -354,6 +354,16 @@ body.chat-split-active .welcome-text {
     border-radius: 6px;
 }
 
+.chat-log-hint {
+    margin: 0 0 6px;
+    padding: 8px 10px;
+    font-size: 0.9rem;
+    color: #5f4a00;
+    background: #fff5c7;
+    border: 1px dashed #caa742;
+    border-radius: 4px;
+}
+
 .chat-bubble {
     max-width: 85%;
     padding: 12px 16px;
@@ -760,75 +770,4 @@ body.chat-split-active .welcome-text {
     transform: translateY(-3px);
     box-shadow: 0 6px 15px rgba(0,0,0,0.25);
     background: #5d4037;
-}
-.chat-log-hint {
-    margin: 0 0 6px;
-    padding: 8px 10px;
-    font-size: 0.9rem;
-    color: #5f4a00;
-    background: #fff5c7;
-    border: 1px dashed #caa742;
-    border-radius: 4px;
-}
-
-/* 서비스 가이드 모달 */
-#guide-modal {
-    position: fixed;
-    inset: 0;
-    z-index: 2600;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    padding: 24px;
-    background: rgba(0, 0, 0, 0.35);
-    box-sizing: border-box;
-}
-
-.guide-content {
-    width: min(560px, 100%);
-    max-height: min(720px, 90vh);
-    overflow-y: auto;
-    background: #fffdf4;
-    border: 3px solid #1f1f1f;
-    border-radius: 14px;
-    padding: 24px;
-    box-shadow: 10px 10px 0 rgba(0, 0, 0, 0.25);
-}
-
-.guide-header {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    gap: 16px;
-    margin-bottom: 18px;
-    padding-bottom: 12px;
-    border-bottom: 2px solid #e0d5c1;
-}
-
-.guide-header h3 {
-    margin: 0;
-}
-
-.guide-body {
-    display: flex;
-    flex-direction: column;
-    gap: 14px;
-}
-
-.guide-body section {
-    padding: 14px;
-    background: #fff8dc;
-    border: 1px solid #e0d5c1;
-    border-radius: 10px;
-}
-
-.guide-body h4 {
-    margin: 0 0 6px;
-    color: #5d4037;
-}
-
-.guide-body p {
-    margin: 0;
-    color: #444;
-    line-height: 1.6;
 }

@@ -26,6 +26,14 @@ function setChatSplitLayout(isActive) {
   document.body.classList.toggle('chat-split-active', Boolean(isActive));
 }
 
+function closeTransientPanels() {
+  ['chat-panel', 'retrospective-panel', 'archive-panel', 'guide-modal', 'graduation-modal', 'seed-popup'].forEach((id) => {
+    const panel = getEl(id);
+    if (panel) panel.classList.add('hidden');
+  });
+  setChatSplitLayout(false);
+}
+
 const AI_LIMITS = {
   CHAT_HISTORY_LIMIT: 6,
   RETRO_HISTORY_LIMIT: 6,

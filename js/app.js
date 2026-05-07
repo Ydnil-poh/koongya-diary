@@ -1,4 +1,4 @@
-import { KOONGYA_ORDER } from './data/koongyas.js';
+import { KOONGYA_ORDER, getKoongyaById, getKoongyaImagePath, normalizeKoongyaId } from './data/koongyas.js';
 import { supabase, generateContentWithFallback, getAiCooldownRemainingMs } from './services/clients.js';
 import {
   getEl,
@@ -128,7 +128,7 @@ async function updateUnlockedList() {
   try {
     const { data } = await supabase.from('archives').select('koongya_type').eq('user_id', currentUser.id);
     console.log('[디버깅] 아카이브 해금 데이터:', data, '현재 유저:', currentUser.id);
-    const graduatedIds = data ? data.map((item) => item.koongya_type) : [];
+    const graduatedIds = data ? data.map((item) => normalizeKoongyaId(item.koongya_type)) : [];
     const newUnlocked = ['onion'];
     KOONGYA_ORDER.forEach((koongya, index) => {
       if (graduatedIds.includes(koongya.id) && index + 1 < KOONGYA_ORDER.length) {
@@ -202,8 +202,57 @@ async function handleEmailLogin() {
   }
 }
 
+function getOAuthRedirectUrl() {
+  return `${window.location.origin}${window.location.pathname}`;
+}
+
+function consumeAuthRedirectError() {
+  const params = new URLSearchParams(window.location.search);
+  const hashParams = new URLSearchParams(window.location.hash.replace(/^#/, ''));
+  const errorDescription = params.get('error_description') || hashParams.get('error_description') || params.get('error') || hashParams.get('error');
+  if (!errorDescription) return;
+
+  showToast(`소셜 로그인 실패: ${decodeURIComponent(errorDescription)}`);
+  window.history.replaceState({}, document.title, getOAuthRedirectUrl());
+}
+
 async function handleGoogleLogin() {
-  await supabase.auth.signInWithOAuth({ provider: 'google', options: { redirectTo: window.location.origin } });
+  const googleBtn = getEl('google-login-btn');
+  if (googleBtn) googleBtn.disabled = true;
+  try {
+    const { error } = await supabase.auth.signInWithOAuth({
+      provider: 'google',
+      options: {
+        redirectTo: getOAuthRedirectUrl(),
+        queryParams: { prompt: 'select_account' }
+      }
+    });
+    if (error) throw error;
+  } catch (error) {
+    console.error('구글 로그인 에러:', error);
+    showToast(`구글 로그인 실패: ${error.message || '설정을 확인해 주세요.'}`);
+    if (googleBtn) googleBtn.disabled = false;
+  }
+}
+
+async function handleLogout() {
+  const logoutBtn = getEl('logout-btn');
+  if (logoutBtn) logoutBtn.disabled = true;
+  try {
+    const { error } = await supabase.auth.signOut();
+    if (error) throw error;
+    localStorage.removeItem('cached_garden');
+    ['chat-panel', 'retrospective-panel', 'archive-panel', 'graduation-modal', 'seed-popup', 'guide-modal'].forEach((id) => {
+      const el = getEl(id);
+      if (el) el.classList.add('hidden');
+    });
+    showToast('로그아웃되었습니다.');
+  } catch (error) {
+    console.error('로그아웃 에러:', error);
+    showToast(`로그아웃 실패: ${error.message || '잠시 후 다시 시도해 주세요.'}`);
+  } finally {
+    if (logoutBtn) logoutBtn.disabled = false;
+  }
 }
 
 async function loadActiveKoongyas() {
@@ -270,7 +319,7 @@ async function openChatPanel(cell) {
     currentKoongyaId = cell.getAttribute('data-koongya-id');
     currentStep = parseInt(cell.getAttribute('data-step')) || 1;
 
-    const koongyaData = KOONGYA_ORDER.find((k) => k.id === currentKoongyaId);
+    const koongyaData = getKoongyaById(currentKoongyaId);
     currentKoongyaName = koongyaData ? koongyaData.name : '쿵야';
 
     getEl('chat-koongya-name').innerText = currentKoongyaName;
@@ -471,7 +520,7 @@ async function processGraduation(diaryContent) {
 
     const result = await generateContentWithFallback(prompt);
     const coreQuestion = result.response.text().replace(/"/g, '').trim();
-    const imagePath = `assets/images/${currentKoongyaId}/step5.png`;
+    const imagePath = getKoongyaImagePath(currentKoongyaId, 5);
 
     const { error: archiveError } = await supabase.from('archives').insert([{ user_id: currentUser.id, koongya_type: currentKoongyaId, image_path: imagePath, core_question: coreQuestion, final_diary: diaryContent }]);
     if (archiveError) throw archiveError;
@@ -577,11 +626,12 @@ async function loadArchives() {
       return;
     }
     data.forEach((item) => {
-      const koongyaData = KOONGYA_ORDER.find((k) => k.id === item.koongya_type);
+      const koongyaData = getKoongyaById(item.koongya_type);
+      const imagePath = item.image_path || getKoongyaImagePath(item.koongya_type, 5);
       list.innerHTML += `
                 <div class="archive-item">
                     <div class="polaroid">
-                        <div class="polaroid-image"><img src="${item.image_path}" alt="${item.koongya_type}" onerror="this.src='https://via.placeholder.com/150'"></div>
+                        <div class="polaroid-image"><img src="${imagePath}" alt="${koongyaData ? koongyaData.name : item.koongya_type} 쿵야" onerror="this.src='${getKoongyaImagePath(item.koongya_type, 5)}'"></div>
                         <div class="polaroid-caption">
                             <p class="archive-question">"${item.core_question}"</p>
                             <span>${koongyaData ? koongyaData.name : item.koongya_type} - ${new Date(item.graduated_at).toLocaleDateString()}</span>
@@ -607,7 +657,9 @@ async function initApp() {
   };
 
   bindClick('email-login-btn', handleEmailLogin);
+  consumeAuthRedirectError();
   bindClick('google-login-btn', handleGoogleLogin);
+  bindClick('logout-btn', handleLogout);
   bindClick('send-btn', handleSendMessage);
   bindClick('close-chat', () => {
     const p = getEl('chat-panel');

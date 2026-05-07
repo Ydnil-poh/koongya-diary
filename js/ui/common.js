@@ -1,3 +1,5 @@
+import { getKoongyaImagePath, normalizeKoongyaId } from '../data/koongyas.js';
+
 export function getEl(id) {
   return document.getElementById(id);
 }
@@ -49,10 +51,12 @@ export function renderGarden(data) {
     if (cell) {
       cell.classList.remove('empty');
       cell.classList.add('has-koongya');
-      cell.setAttribute('data-koongya-id', item.koongya_type);
+      const koongyaId = normalizeKoongyaId(item.koongya_type);
+      const imagePath = getKoongyaImagePath(koongyaId, item.current_step);
+      cell.setAttribute('data-koongya-id', koongyaId);
       cell.setAttribute('data-db-id', item.id);
       cell.setAttribute('data-step', item.current_step);
-      cell.innerHTML = `<img src="assets/images/${item.koongya_type}/step${item.current_step}.png" class="koongya-sprite" loading="lazy">`;
+      cell.innerHTML = `<img src="${imagePath}" class="koongya-sprite" alt="${koongyaId} 쿵야" loading="lazy">`;
     }
   });
 }

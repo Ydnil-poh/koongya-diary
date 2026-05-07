@@ -125,15 +125,6 @@ body {
     box-shadow: 0 0 0 3px rgba(139, 195, 74, 0.1);
 }
 
-.google-btn {
-    background-color: #fff;
-    color: #333;
-    border-color: #ddd;
-}
-
-.google-btn:hover {
-    background-color: #f9f9f9;
-}
 
 /* ==========================================
    4. 3x3 아이소메트릭 그리드 및 잔디밭

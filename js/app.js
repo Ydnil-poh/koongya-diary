@@ -26,6 +26,14 @@ function setChatSplitLayout(isActive) {
   document.body.classList.toggle('chat-split-active', Boolean(isActive));
 }
 
+function closeTransientPanels() {
+  ['chat-panel', 'retrospective-panel', 'archive-panel', 'guide-modal', 'graduation-modal', 'seed-popup'].forEach((id) => {
+    const panel = getEl(id);
+    if (panel) panel.classList.add('hidden');
+  });
+  setChatSplitLayout(false);
+}
+
 const AI_LIMITS = {
   CHAT_HISTORY_LIMIT: 6,
   RETRO_HISTORY_LIMIT: 6,
@@ -149,6 +157,7 @@ async function updateUIForAuth(session) {
     loadGardenFromLocal(renderGarden);
     await Promise.all([loadActiveKoongyas(), updateUnlockedList()]);
   } else {
+    closeTransientPanels();
     currentUser = null;
     if (loginScreen) {
       loginScreen.style.display = 'flex';
@@ -162,6 +171,18 @@ async function updateUIForAuth(session) {
     else if (archiveBtn) archiveBtn.classList.add('hidden');
     hideLoadingOverlay();
   }
+}
+
+async function handleLogout() {
+  closeTransientPanels();
+  localStorage.removeItem('cached_garden');
+  const { error } = await supabase.auth.signOut();
+  if (error) {
+    console.error('로그아웃 에러:', error);
+    showToast('로그아웃 실패: ' + error.message);
+    return;
+  }
+  showToast('로그아웃되었습니다.');
 }
 
 async function handleEmailLogin() {
@@ -613,6 +634,7 @@ async function initApp() {
   bindClick('email-login-btn', handleEmailLogin);
   bindClick('google-login-btn', handleGoogleLogin);
   bindClick('send-btn', handleSendMessage);
+  bindClick('logout-btn', handleLogout);
   bindClick('close-chat', () => {
     const p = getEl('chat-panel');
     if (p) p.classList.add('hidden');

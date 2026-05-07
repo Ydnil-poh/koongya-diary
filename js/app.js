@@ -148,6 +148,7 @@ async function updateUIForAuth(session) {
   const loginScreen = getEl('login-screen');
   const gardenContainer = document.querySelector('.garden-container');
   const archiveBtn = getEl('archive-btn');
+  const topControls = getEl('top-controls');
   if (session) {
     currentUser = session.user;
     if (loginScreen) loginScreen.style.display = 'none';
@@ -155,7 +156,8 @@ async function updateUIForAuth(session) {
       gardenContainer.style.display = 'block';
       requestAnimationFrame(() => gardenContainer.classList.add('visible'));
     }
-    if (archiveBtn) archiveBtn.classList.remove('hidden');
+    if (topControls) topControls.classList.remove('hidden');
+    else if (archiveBtn) archiveBtn.classList.remove('hidden');
     loadGardenFromLocal(renderGarden);
     await Promise.all([loadActiveKoongyas(), updateUnlockedList()]);
   } else {
@@ -168,7 +170,8 @@ async function updateUIForAuth(session) {
       gardenContainer.classList.remove('visible');
       gardenContainer.style.display = 'none';
     }
-    if (archiveBtn) archiveBtn.classList.add('hidden');
+    if (topControls) topControls.classList.add('hidden');
+    else if (archiveBtn) archiveBtn.classList.add('hidden');
     hideLoadingOverlay();
   }
 }
@@ -685,6 +688,14 @@ async function initApp() {
   bindClick('close-archive', () => {
     const p = getEl('archive-panel');
     if (p) p.classList.add('hidden');
+  });
+  bindClick('guide-btn', () => {
+    const m = getEl('guide-modal');
+    if (m) m.classList.remove('hidden');
+  });
+  bindClick('close-guide-btn', () => {
+    const m = getEl('guide-modal');
+    if (m) m.classList.add('hidden');
   });
   bindClick('retrospective-btn', openRetrospective);
 

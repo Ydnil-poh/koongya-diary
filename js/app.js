@@ -1,4 +1,4 @@
-import { KOONGYA_ORDER } from './data/koongyas.js';
+import { KOONGYA_ORDER, getKoongyaById, getKoongyaImagePath, normalizeKoongyaId } from './data/koongyas.js';
 import { supabase, generateContentWithFallback, getAiCooldownRemainingMs } from './services/clients.js';
 import {
   getEl,
@@ -36,7 +36,7 @@ function closeTransientPanels() {
 
 const AI_LIMITS = {
   CHAT_HISTORY_LIMIT: 6,
-  RETRO_HISTORY_LIMIT: 6,
+  RETRO_HISTORY_LIMIT: 4,
   GRAD_HISTORY_LIMIT: 8,
   MAX_MESSAGE_CHARS: 280,
   MAX_DIARY_CHARS: 500
@@ -47,21 +47,37 @@ function clipText(value, maxChars) {
   return value.length > maxChars ? `${value.slice(0, maxChars)}…` : value;
 }
 
-function buildChatContext(logs) {
+function buildCoachingGuide() {
+  return `너는 사용자의 짧은 생각을 확장해 글감으로 발전시키는 코치야.
+- 핵심 1가지만 짚어 확장해.
+- 답변 끝에 구체 질문 1개를 포함해.
+- 짧고 밀도 있게 답해.
+- 마크다운 기호(**, #)는 쓰지 말고 순수 텍스트로 작성해.`;
+}
+
+function buildInsightGuide() {
+  return `너는 회고 코치야.
+[역할]
+- 캐릭터 역할극/페르소나 말투는 사용하지 말고, 대화 전체를 하나의 글감으로 묶는 데 집중해.
+- 핵심 감정 1개 + 핵심 주제 1개를 뽑아 간결하게 연결해.
+[출력 규칙]
+- 2~3문장 코멘트와 마지막 질문 1개만 작성해.
+- 질문은 사용자가 바로 일기 문장으로 이어 쓸 수 있게 구체적으로 만들어.
+- 마크다운 기호(**, #)는 쓰지 말고 순수 텍스트로 작성해.`;
+}
+
+function buildDialogueSnippet(logs, maxChars = AI_LIMITS.MAX_MESSAGE_CHARS) {
   if (!logs || logs.length === 0) return '';
   return logs
-    .map((log) => `${log.sender === 'user' ? '사용자' : '쿵야'}: ${clipText(log.message, AI_LIMITS.MAX_MESSAGE_CHARS)}`)
+    .map((log) => `${log.sender === 'user' ? '사용자' : '쿵야'}: ${clipText(log.message, maxChars)}`)
     .join('\n');
 }
 
-function buildPersonaGuide(koongyaName, koongyaDescription) {
-  return `너는 ${koongyaName} 쿵야야. 성격 특징은 "${koongyaDescription}".
-[대화 목표]
-1) 사용자의 짧은 생각을 한 단계 확장해 긴 글감으로 발전시키는 데 도움을 줘.
-2) 답변 끝에 생각을 확장할 수 있는 구체 질문 1개를 반드시 던져줘.
-3) 캐릭터 말투는 은은하게 유지하되, 과장된 역할극은 피하고 코칭/피드백 품질을 우선해.
-[형식 규칙]
-- 마크다운 기호(**, #)는 쓰지 말고 순수 텍스트로 작성해.`;
+function buildInsightContext(logs) {
+  if (!logs || logs.length === 0) return '';
+  return logs
+    .map((log) => `${log.sender === 'user' ? '사용자' : '쿵야'}: ${log.message}`)
+    .join('\n');
 }
 
 function parseCooldownSeconds(error) {
@@ -74,11 +90,10 @@ function parseCooldownSeconds(error) {
 function syncAICooldownUI() {
   const remaining = Math.ceil(getAiCooldownRemainingMs() / 1000);
   const sendBtn = getEl('send-btn');
-  const retroBtn = getEl('retrospective-btn');
   const regenBtn = getEl('regenerate-insight-btn');
   const saveBtn = getEl('save-diary-btn');
   const disabled = remaining > 0;
-  [sendBtn, retroBtn, regenBtn, saveBtn].forEach((btn) => {
+  [sendBtn, regenBtn, saveBtn].forEach((btn) => {
     if (btn) btn.disabled = disabled;
   });
   const now = Date.now();
@@ -124,7 +139,7 @@ async function updateUnlockedList() {
   try {
     const { data } = await supabase.from('archives').select('koongya_type').eq('user_id', currentUser.id);
     console.log('[디버깅] 아카이브 해금 데이터:', data, '현재 유저:', currentUser.id);
-    const graduatedIds = data ? data.map((item) => item.koongya_type) : [];
+    const graduatedIds = data ? data.map((item) => normalizeKoongyaId(item.koongya_type)) : [];
     const newUnlocked = ['onion'];
     KOONGYA_ORDER.forEach((koongya, index) => {
       if (graduatedIds.includes(koongya.id) && index + 1 < KOONGYA_ORDER.length) {
@@ -140,7 +155,17 @@ async function updateUnlockedList() {
   }
 }
 
-async function updateUIForAuth(session) {
+async function refreshAuthenticatedData() {
+  const results = await Promise.allSettled([loadActiveKoongyas(), updateUnlockedList()]);
+  results.forEach((result, index) => {
+    if (result.status === 'rejected') {
+      const label = index === 0 ? '정원' : '해금 목록';
+      console.error(`${label} 초기화 에러:`, result.reason);
+    }
+  });
+}
+
+function updateUIForAuth(session) {
   const loginScreen = getEl('login-screen');
   const gardenContainer = document.querySelector('.garden-container');
   const archiveBtn = getEl('archive-btn');
@@ -153,8 +178,11 @@ async function updateUIForAuth(session) {
     }
     if (archiveBtn) archiveBtn.classList.remove('hidden');
     loadGardenFromLocal(renderGarden);
-    await Promise.all([loadActiveKoongyas(), updateUnlockedList()]);
+    hideLoadingOverlay();
+    syncAICooldownUI();
+    refreshAuthenticatedData().catch((error) => console.error('인증 후 데이터 초기화 에러:', error));
   } else {
+    closeTransientPanels();
     currentUser = null;
     if (loginScreen) {
       loginScreen.style.display = 'flex';
@@ -167,6 +195,18 @@ async function updateUIForAuth(session) {
     if (archiveBtn) archiveBtn.classList.add('hidden');
     hideLoadingOverlay();
   }
+}
+
+async function handleLogout() {
+  closeTransientPanels();
+  localStorage.removeItem('cached_garden');
+  const { error } = await supabase.auth.signOut();
+  if (error) {
+    console.error('로그아웃 에러:', error);
+    showToast('로그아웃 실패: ' + error.message);
+    return;
+  }
+  showToast('로그아웃되었습니다.');
 }
 
 async function handleEmailLogin() {
@@ -195,8 +235,24 @@ async function handleEmailLogin() {
   }
 }
 
-async function handleGoogleLogin() {
-  await supabase.auth.signInWithOAuth({ provider: 'google', options: { redirectTo: window.location.origin } });
+async function handleLogout() {
+  const logoutBtn = getEl('logout-btn');
+  if (logoutBtn) logoutBtn.disabled = true;
+  try {
+    const { error } = await supabase.auth.signOut();
+    if (error) throw error;
+    localStorage.removeItem('cached_garden');
+    ['chat-panel', 'retrospective-panel', 'archive-panel', 'graduation-modal', 'seed-popup', 'guide-modal'].forEach((id) => {
+      const el = getEl(id);
+      if (el) el.classList.add('hidden');
+    });
+    showToast('로그아웃되었습니다.');
+  } catch (error) {
+    console.error('로그아웃 에러:', error);
+    showToast(`로그아웃 실패: ${error.message || '잠시 후 다시 시도해 주세요.'}`);
+  } finally {
+    if (logoutBtn) logoutBtn.disabled = false;
+  }
 }
 
 async function loadActiveKoongyas() {
@@ -263,7 +319,7 @@ async function openChatPanel(cell) {
     currentKoongyaId = cell.getAttribute('data-koongya-id');
     currentStep = parseInt(cell.getAttribute('data-step')) || 1;
 
-    const koongyaData = KOONGYA_ORDER.find((k) => k.id === currentKoongyaId);
+    const koongyaData = getKoongyaById(currentKoongyaId);
     currentKoongyaName = koongyaData ? koongyaData.name : '쿵야';
 
     getEl('chat-koongya-name').innerText = currentKoongyaName;
@@ -345,14 +401,6 @@ async function handleSendMessage() {
   updateRetroButtonVisibility().catch((e) => console.error(e));
 
   try {
-    const { data: logs } = await supabase
-      .from('chat_logs')
-      .select('sender, message')
-      .eq('koongya_id', targetDbId)
-      .order('created_at', { ascending: false })
-      .limit(AI_LIMITS.CHAT_HISTORY_LIMIT);
-    const chatContext = buildChatContext((logs || []).reverse());
-
     const { data: koongyaDataDb } = await supabase.from('active_koongyas').select('diary_content').eq('id', targetDbId).single();
 
     let diaryContext = '';
@@ -360,10 +408,8 @@ async function handleSendMessage() {
       diaryContext = `[사용자의 이전 일기 요약]\n"${clipText(koongyaDataDb.diary_content, AI_LIMITS.MAX_DIARY_CHARS)}"\n이 내용을 기억하고 공감하는 뉘앙스를 조금 섞어서 대화해.\n\n`;
     }
 
-    const koongyaInfo = KOONGYA_ORDER.find((k) => k.id === targetKoongyaId);
-    const systemPrompt = buildPersonaGuide(targetKoongyaName, koongyaInfo.description);
-
-    const result = await generateContentWithFallback(`${systemPrompt}\n\n${diaryContext}[최근 대화]\n${chatContext}\n[현재 대화]\n사용자: "${message}"\n쿵야:`);
+    const systemPrompt = buildCoachingGuide();
+    const result = await generateContentWithFallback(`${systemPrompt}\n\n${diaryContext}[현재 대화]\n사용자: "${message}"\n코치:`);
     const responseText = result.response.text();
 
     await saveChatLog(targetDbId, 'ai', responseText);
@@ -409,23 +455,22 @@ async function generateAIInsight() {
   if (!aiKeywordsContainer) return;
   insightGenerationInFlight = true;
   if (regenBtn) regenBtn.disabled = true;
-  if (insightCache.koongyaId === currentDbId && insightCache.content) {
-    aiKeywordsContainer.innerHTML = `<div class="insight-box">${insightCache.content.replace(/\n/g, '<br>')}</div>`;
-    return;
-  }
-  aiKeywordsContainer.innerHTML = '<p>분석 중...</p>';
   try {
+    if (insightCache.koongyaId === currentDbId && insightCache.content) {
+      aiKeywordsContainer.innerHTML = `<div class="insight-box">${insightCache.content.replace(/\n/g, '<br>')}</div>`;
+      return;
+    }
+    aiKeywordsContainer.innerHTML = '<p>분석 중...</p>';
     const { data: logs } = await supabase
       .from('chat_logs')
       .select('sender, message')
       .eq('koongya_id', currentDbId)
       .order('created_at', { ascending: false })
       .limit(AI_LIMITS.RETRO_HISTORY_LIMIT);
-    const chatContext = buildChatContext((logs || []).reverse());
-    const koongyaDesc = KOONGYA_ORDER.find((k) => k.id === currentKoongyaId).description;
-    const systemPrompt = buildPersonaGuide(currentKoongyaName, koongyaDesc);
+    const chatContext = buildInsightContext((logs || []).reverse());
+    const systemPrompt = buildInsightGuide();
     const result = await generateContentWithFallback(
-      `${systemPrompt}\n\n[대화 기록]\n${chatContext}\n\n[요청]\n대화를 바탕으로 2~3문장 코멘트 + 글감을 확장할 질문 1개를 제시해줘.`
+      `${systemPrompt}\n\n[대화 기록(최근 핵심 발화 요약본)]\n${chatContext}\n\n[요청]\n대화를 관통하는 주제를 하나로 묶어 2~3문장 코멘트 + 글감을 확장할 질문 1개를 제시해줘.`
     );
     const insightText = result.response.text();
     insightCache = { koongyaId: currentDbId, content: insightText };
@@ -470,15 +515,14 @@ async function processGraduation(diaryContent) {
       .eq('koongya_id', currentDbId)
       .order('created_at', { ascending: false })
       .limit(AI_LIMITS.GRAD_HISTORY_LIMIT);
-    const chatContext = buildChatContext((logs || []).reverse());
-    const koongyaDesc = KOONGYA_ORDER.find((k) => k.id === currentKoongyaId).description;
+    const chatContext = buildDialogueSnippet((logs || []).reverse());
     const safeDiary = clipText(diaryContent, AI_LIMITS.MAX_DIARY_CHARS);
 
-    const prompt = `${buildPersonaGuide(currentKoongyaName, koongyaDesc)}\n사용자가 너와 나눈 최근 대화와 마지막 일기를 바탕으로, 다음 글을 더 길고 깊게 쓸 수 있게 돕는 '핵심 확장 질문 1개'를 30자 이내로 작성해.\n\n[최근 대화내용]\n"${chatContext}"\n\n[일기]\n"${safeDiary}"`;
+    const prompt = `${buildCoachingGuide()}\n사용자가 너와 나눈 최근 대화와 마지막 일기를 바탕으로, 다음 글을 더 길고 깊게 쓸 수 있게 돕는 '핵심 확장 질문 1개'를 30자 이내로 작성해.\n\n[최근 대화내용]\n"${chatContext}"\n\n[일기]\n"${safeDiary}"`;
 
     const result = await generateContentWithFallback(prompt);
     const coreQuestion = result.response.text().replace(/"/g, '').trim();
-    const imagePath = `assets/images/${currentKoongyaId}/step5.png`;
+    const imagePath = getKoongyaImagePath(currentKoongyaId, 5);
 
     const { error: archiveError } = await supabase.from('archives').insert([{ user_id: currentUser.id, koongya_type: currentKoongyaId, image_path: imagePath, core_question: coreQuestion, final_diary: diaryContent }]);
     if (archiveError) throw archiveError;
@@ -533,9 +577,7 @@ async function saveDiaryAndEvolve() {
       showToast('일기 저장 완료! 쿵야가 일기를 읽으며 진화 중입니다...');
 
       const nextStep = currentStep + 1;
-      const koongyaDesc = KOONGYA_ORDER.find((k) => k.id === targetKoongyaId).description;
-
-      const prompt = `${buildPersonaGuide(targetKoongyaName, koongyaDesc)}
+      const prompt = `${buildCoachingGuide()}
 사용자가 방금 너와의 대화를 마친 후 아래와 같은 [최신 회고록]을 남겼어.
 
 [최신 회고록]
@@ -586,11 +628,12 @@ async function loadArchives() {
       return;
     }
     data.forEach((item) => {
-      const koongyaData = KOONGYA_ORDER.find((k) => k.id === item.koongya_type);
+      const koongyaData = getKoongyaById(item.koongya_type);
+      const imagePath = item.image_path || getKoongyaImagePath(item.koongya_type, 5);
       list.innerHTML += `
                 <div class="archive-item">
                     <div class="polaroid">
-                        <div class="polaroid-image"><img src="${item.image_path}" alt="${item.koongya_type}" onerror="this.src='https://via.placeholder.com/150'"></div>
+                        <div class="polaroid-image"><img src="${imagePath}" alt="${koongyaData ? koongyaData.name : item.koongya_type} 쿵야" onerror="this.src='${getKoongyaImagePath(item.koongya_type, 5)}'"></div>
                         <div class="polaroid-caption">
                             <p class="archive-question">"${item.core_question}"</p>
                             <span>${koongyaData ? koongyaData.name : item.koongya_type} - ${new Date(item.graduated_at).toLocaleDateString()}</span>
@@ -616,8 +659,9 @@ async function initApp() {
   };
 
   bindClick('email-login-btn', handleEmailLogin);
-  bindClick('google-login-btn', handleGoogleLogin);
+  bindClick('logout-btn', handleLogout);
   bindClick('send-btn', handleSendMessage);
+  bindClick('logout-btn', handleLogout);
   bindClick('close-chat', () => {
     const p = getEl('chat-panel');
     if (p) p.classList.add('hidden');
@@ -683,17 +727,17 @@ async function initApp() {
     data: { session }
   } = await supabase.auth.getSession();
   if (session) {
-    await updateUIForAuth(session);
+    updateUIForAuth(session);
   } else {
-    await updateUIForAuth(null);
+    updateUIForAuth(null);
   }
 
-  supabase.auth.onAuthStateChange(async (event, sessionValue) => {
+  supabase.auth.onAuthStateChange((event, sessionValue) => {
     console.log('[Auth Event]', event);
     if (event === 'SIGNED_IN' || event === 'INITIAL_SESSION' || event === 'TOKEN_REFRESHED') {
-      await updateUIForAuth(sessionValue);
+      updateUIForAuth(sessionValue);
     } else if (event === 'SIGNED_OUT') {
-      await updateUIForAuth(null);
+      updateUIForAuth(null);
     }
   });
 

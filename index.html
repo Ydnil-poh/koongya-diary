@@ -75,16 +75,17 @@
     <!-- 1. 캐릭터 전용 대화 패널 -->
     <div id="chat-panel" class="hidden">
         <div class="chat-header">
-            <span id="chat-koongya-name">쿵야</span>와의 대화
+            <span id="chat-koongya-name">쿵야</span> 라운지
             <button id="close-chat">X</button>
         </div>
         <div class="chat-log" id="chat-log">
-            <!-- 말풍선 대화가 쌓이는 곳 -->
+            <p class="chat-log-hint">짧은 답장보다, 지금 마음에 남은 장면을 2~3문장으로 들려줘.</p>
         </div>
         <!-- 응답 대기 중 '...' 애니메이션 영역 -->
         <div id="chat-loading" class="hidden">쿵야가 생각 중이에요...</div>
         <div class="chat-input-area">
-            <input type="text" id="chat-input" placeholder="쿵야에게 말 걸기...">
+            <textarea id="chat-input" rows="3" placeholder="쿵야와 같이 한 호흡으로 이야기해봐요.
+(Enter 전송 / Shift+Enter 줄바꿈)"></textarea>
             <button id="send-btn">전송</button>
             <!-- 5-3-1 로직에 따라 대화 횟수 충족 시 나타날 회고 버튼 -->
             <button id="retrospective-btn" class="hidden" style="background-color: #ff9800;">회고하기</button>
@@ -147,6 +148,7 @@
             <!-- 졸업한 쿵야 폴라로이드들이 쌓이는 곳 -->
         </div>
     </div>
+
 
     <script type="module" src="js/app.js"></script>
 </body>

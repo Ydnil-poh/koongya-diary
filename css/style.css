@@ -354,16 +354,6 @@ body.chat-split-active .welcome-text {
     border-radius: 6px;
 }
 
-.chat-log-hint {
-    margin: 0 0 6px;
-    padding: 8px 10px;
-    font-size: 0.9rem;
-    color: #5f4a00;
-    background: #fff5c7;
-    border: 1px dashed #caa742;
-    border-radius: 4px;
-}
-
 .chat-bubble {
     max-width: 85%;
     padding: 12px 16px;

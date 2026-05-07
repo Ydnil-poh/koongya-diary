@@ -78,11 +78,10 @@ function parseCooldownSeconds(error) {
 function syncAICooldownUI() {
   const remaining = Math.ceil(getAiCooldownRemainingMs() / 1000);
   const sendBtn = getEl('send-btn');
-  const retroBtn = getEl('retrospective-btn');
   const regenBtn = getEl('regenerate-insight-btn');
   const saveBtn = getEl('save-diary-btn');
   const disabled = remaining > 0;
-  [sendBtn, retroBtn, regenBtn, saveBtn].forEach((btn) => {
+  [sendBtn, regenBtn, saveBtn].forEach((btn) => {
     if (btn) btn.disabled = disabled;
   });
   const now = Date.now();
@@ -144,7 +143,17 @@ async function updateUnlockedList() {
   }
 }
 
-async function updateUIForAuth(session) {
+async function refreshAuthenticatedData() {
+  const results = await Promise.allSettled([loadActiveKoongyas(), updateUnlockedList()]);
+  results.forEach((result, index) => {
+    if (result.status === 'rejected') {
+      const label = index === 0 ? '정원' : '해금 목록';
+      console.error(`${label} 초기화 에러:`, result.reason);
+    }
+  });
+}
+
+function updateUIForAuth(session) {
   const loginScreen = getEl('login-screen');
   const gardenContainer = document.querySelector('.garden-container');
   const archiveBtn = getEl('archive-btn');
@@ -159,7 +168,9 @@ async function updateUIForAuth(session) {
     if (topControls) topControls.classList.remove('hidden');
     else if (archiveBtn) archiveBtn.classList.remove('hidden');
     loadGardenFromLocal(renderGarden);
-    await Promise.all([loadActiveKoongyas(), updateUnlockedList()]);
+    hideLoadingOverlay();
+    syncAICooldownUI();
+    refreshAuthenticatedData().catch((error) => console.error('인증 후 데이터 초기화 에러:', error));
   } else {
     currentUser = null;
     if (loginScreen) {
@@ -199,39 +210,6 @@ async function handleEmailLogin() {
     } else {
       showToast('로그인 실패: ' + signInError.message);
     }
-  }
-}
-
-function getOAuthRedirectUrl() {
-  return `${window.location.origin}${window.location.pathname}`;
-}
-
-function consumeAuthRedirectError() {
-  const params = new URLSearchParams(window.location.search);
-  const hashParams = new URLSearchParams(window.location.hash.replace(/^#/, ''));
-  const errorDescription = params.get('error_description') || hashParams.get('error_description') || params.get('error') || hashParams.get('error');
-  if (!errorDescription) return;
-
-  showToast(`소셜 로그인 실패: ${decodeURIComponent(errorDescription)}`);
-  window.history.replaceState({}, document.title, getOAuthRedirectUrl());
-}
-
-async function handleGoogleLogin() {
-  const googleBtn = getEl('google-login-btn');
-  if (googleBtn) googleBtn.disabled = true;
-  try {
-    const { error } = await supabase.auth.signInWithOAuth({
-      provider: 'google',
-      options: {
-        redirectTo: getOAuthRedirectUrl(),
-        queryParams: { prompt: 'select_account' }
-      }
-    });
-    if (error) throw error;
-  } catch (error) {
-    console.error('구글 로그인 에러:', error);
-    showToast(`구글 로그인 실패: ${error.message || '설정을 확인해 주세요.'}`);
-    if (googleBtn) googleBtn.disabled = false;
   }
 }
 
@@ -454,12 +432,12 @@ async function generateAIInsight() {
   if (!aiKeywordsContainer) return;
   insightGenerationInFlight = true;
   if (regenBtn) regenBtn.disabled = true;
-  if (insightCache.koongyaId === currentDbId && insightCache.content) {
-    aiKeywordsContainer.innerHTML = `<div class="insight-box">${insightCache.content.replace(/\n/g, '<br>')}</div>`;
-    return;
-  }
-  aiKeywordsContainer.innerHTML = '<p>분석 중...</p>';
   try {
+    if (insightCache.koongyaId === currentDbId && insightCache.content) {
+      aiKeywordsContainer.innerHTML = `<div class="insight-box">${insightCache.content.replace(/\n/g, '<br>')}</div>`;
+      return;
+    }
+    aiKeywordsContainer.innerHTML = '<p>분석 중...</p>';
     const { data: logs } = await supabase
       .from('chat_logs')
       .select('sender, message')
@@ -657,8 +635,6 @@ async function initApp() {
   };
 
   bindClick('email-login-btn', handleEmailLogin);
-  consumeAuthRedirectError();
-  bindClick('google-login-btn', handleGoogleLogin);
   bindClick('logout-btn', handleLogout);
   bindClick('send-btn', handleSendMessage);
   bindClick('close-chat', () => {
@@ -732,17 +708,17 @@ async function initApp() {
     data: { session }
   } = await supabase.auth.getSession();
   if (session) {
-    await updateUIForAuth(session);
+    updateUIForAuth(session);
   } else {
-    await updateUIForAuth(null);
+    updateUIForAuth(null);
   }
 
-  supabase.auth.onAuthStateChange(async (event, sessionValue) => {
+  supabase.auth.onAuthStateChange((event, sessionValue) => {
     console.log('[Auth Event]', event);
     if (event === 'SIGNED_IN' || event === 'INITIAL_SESSION' || event === 'TOKEN_REFRESHED') {
-      await updateUIForAuth(sessionValue);
+      updateUIForAuth(sessionValue);
     } else if (event === 'SIGNED_OUT') {
-      await updateUIForAuth(null);
+      updateUIForAuth(null);
     }
   });
 

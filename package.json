@@ -2,8 +2,5 @@
   "name": "koongya-diary",
   "version": "1.0.0",
   "private": true,
-  "type": "module",
-  "scripts": {
-    "lint": "node --check api/config.js && node --check js/app.js && node --check js/config.js && node --check js/data/koongyas.js && node --check js/services/clients.js && node --check js/ui/common.js"
-  }
+  "type": "module"
 }

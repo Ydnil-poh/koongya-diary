@@ -22,6 +22,10 @@ let lastCooldownToastAt = 0;
 const COOLDOWN_TOAST_INTERVAL_MS = 10 * 1000;
 let insightGenerationInFlight = false;
 
+function setChatSplitLayout(isActive) {
+  document.body.classList.toggle('chat-split-active', Boolean(isActive));
+}
+
 const AI_LIMITS = {
   CHAT_HISTORY_LIMIT: 6,
   RETRO_HISTORY_LIMIT: 6,
@@ -264,6 +268,7 @@ async function openChatPanel(cell) {
     await loadChatHistory(currentDbId);
     updateRetroButtonVisibility().catch((e) => console.error(e));
     getEl('chat-panel').classList.remove('hidden');
+    setChatSplitLayout(true);
   } catch (err) {
     console.error('채팅창 열기 에러:', err);
   }
@@ -436,6 +441,7 @@ async function generateAIInsight() {
 
 async function openRetrospective() {
   getEl('chat-panel').classList.add('hidden');
+  setChatSplitLayout(false);
   getEl('retrospective-panel').classList.remove('hidden');
   generateAIInsight();
   const diaryInput = getEl('diary-input');
@@ -610,11 +616,13 @@ async function initApp() {
   bindClick('close-chat', () => {
     const p = getEl('chat-panel');
     if (p) p.classList.add('hidden');
+    setChatSplitLayout(false);
   });
   bindClick('save-diary-btn', saveDiaryAndEvolve);
   bindClick('close-retrospective', () => {
     const p = getEl('retrospective-panel');
     if (p) p.classList.add('hidden');
+    setChatSplitLayout(false);
   });
   bindClick('regenerate-insight-btn', () => {
     insightCache = { koongyaId: null, content: null };
@@ -646,7 +654,7 @@ async function initApp() {
   bindClick('retrospective-btn', openRetrospective);
 
   bindKey('chat-input', (e) => {
-    if (e.key === 'Enter') {
+    if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault();
       handleSendMessage();
     }

@@ -170,23 +170,6 @@ body {
     opacity: 1;
 }
 
-body.chat-split-active .garden-container.visible {
-    position: fixed;
-    top: 0;
-    left: 0;
-    width: 50vw;
-    height: 100vh;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    padding: 24px;
-    box-sizing: border-box;
-}
-
-body.chat-split-active .welcome-text {
-    left: 25vw;
-}
-
 .isometric-grid {
     display: grid;
     grid-template-columns: repeat(3, 100px);
@@ -296,62 +279,40 @@ body.chat-split-active .welcome-text {
    6. 대화 패널
 ========================================== */
 #chat-panel {
-    position: fixed;
-    top: 0;
-    right: 0;
-    width: 50vw;
-    min-width: 520px;
-    height: 100vh;
-    background: linear-gradient(180deg, #fffdf4 0%, #ffffff 100%);
-    border-left: 4px solid #1f1f1f;
-    padding: 18px 18px 20px;
-    box-shadow: -12px 0 28px rgba(0, 0, 0, 0.16);
-    z-index: 1500;
+    position: absolute;
+    bottom: 20px;
+    right: 20px;
+    width: 380px;
+    height: 550px;
+    max-height: 80vh;
+    background: white;
+    border: 1px solid #ddd;
+    padding: 20px;
+    box-shadow: 0 10px 30px rgba(0, 0, 0, 0.1);
+    z-index: 1500; /* 정원(1) 및 다른 요소보다 높게 설정 */
     display: flex;
     flex-direction: column;
-    border-radius: 0;
-}
-
-#chat-panel::before {
-    content: '';
-    position: absolute;
-    top: 0;
-    left: -12px;
-    width: 12px;
-    height: 100%;
-    background: repeating-linear-gradient(
-        to bottom,
-        rgba(31, 31, 31, 0.75),
-        rgba(31, 31, 31, 0.75) 10px,
-        rgba(31, 31, 31, 0.35) 10px,
-        rgba(31, 31, 31, 0.35) 20px
-    );
+    border-radius: 24px;
 }
 
 .chat-header {
     font-weight: bold;
-    border: 2px solid #1f1f1f;
-    background: #ffe27a;
-    padding: 10px 14px;
-    margin-bottom: 10px;
+    border-bottom: 1px solid #eee;
+    padding-bottom: 12px;
+    margin-bottom: 15px;
     display: flex;
     justify-content: space-between;
-    align-items: center;
-    border-radius: 6px;
 }
 
 .chat-log {
     flex-grow: 1;
     overflow-y: auto;
-    margin-bottom: 10px;
+    margin-bottom: 15px;
     font-size: 1rem;
     display: flex;
     flex-direction: column;
-    gap: 12px;
-    padding: 12px;
-    background: #fff;
-    border: 2px solid #1f1f1f;
-    border-radius: 6px;
+    gap: 14px;
+    padding-right: 8px;
 }
 
 .chat-bubble {
@@ -389,40 +350,19 @@ body.chat-split-active .welcome-text {
 }
 
 .chat-input-area {
-    display: grid;
-    grid-template-columns: 1fr auto auto;
+    display: flex;
     gap: 10px;
-    padding-top: 12px;
+    padding-top: 15px;
+    border-top: 1px solid #eee;
 }
 
-.chat-input-area textarea {
-    resize: none;
+.chat-input-area input {
+    flex-grow: 1;
     font-family: 'Binggrae', sans-serif;
     padding: 10px;
-    border: 2px solid #1f1f1f;
-    border-radius: 6px;
+    border: 1px solid #ddd;
+    border-radius: 8px;
     outline: none;
-    line-height: 1.45;
-    min-height: 72px;
-}
-
-@media (max-width: 1100px) {
-    #chat-panel {
-        width: 100vw;
-        min-width: 0;
-    }
-
-    #chat-panel::before {
-        display: none;
-    }
-
-    body.chat-split-active .garden-container.visible {
-        width: 100vw;
-    }
-
-    body.chat-split-active .welcome-text {
-        left: 50%;
-    }
 }
 
 /* ==========================================
@@ -763,6 +703,7 @@ body.chat-split-active .welcome-text {
 }
 /* ==========================================
    11. 상단 메뉴 및 가이드 모달
+========================================== */
 #top-controls {
     position: fixed;
     bottom: 25px;

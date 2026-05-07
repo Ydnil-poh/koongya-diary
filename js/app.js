@@ -640,6 +640,14 @@ async function initApp() {
     const p = getEl('archive-panel');
     if (p) p.classList.add('hidden');
   });
+  bindClick('guide-btn', () => {
+    const m = getEl('guide-modal');
+    if (m) m.classList.remove('hidden');
+  });
+  bindClick('close-guide-btn', () => {
+    const m = getEl('guide-modal');
+    if (m) m.classList.add('hidden');
+  });
   bindClick('retrospective-btn', openRetrospective);
 
   bindKey('chat-input', (e) => {

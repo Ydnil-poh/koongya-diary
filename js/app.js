@@ -173,18 +173,6 @@ async function updateUIForAuth(session) {
   }
 }
 
-async function handleTopControlLogout() {
-  closeTransientPanels();
-  localStorage.removeItem('cached_garden');
-  const { error } = await supabase.auth.signOut();
-  if (error) {
-    console.error('로그아웃 에러:', error);
-    showToast('로그아웃 실패: ' + error.message);
-    return;
-  }
-  showToast('로그아웃되었습니다.');
-}
-
 async function handleEmailLogin() {
   const email = getEl('email-input').value;
   const password = getEl('password-input').value;
@@ -634,7 +622,6 @@ async function initApp() {
   bindClick('email-login-btn', handleEmailLogin);
   bindClick('google-login-btn', handleGoogleLogin);
   bindClick('send-btn', handleSendMessage);
-  bindClick('logout-btn', handleTopControlLogout);
   bindClick('close-chat', () => {
     const p = getEl('chat-panel');
     if (p) p.classList.add('hidden');

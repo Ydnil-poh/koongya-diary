@@ -3,6 +3,8 @@ import { GoogleGenAI } from 'https://esm.run/@google/genai';
 
 const AI_COOLDOWN_UNTIL_KEY = 'koongya_ai_cooldown_until';
 const DEFAULT_MODEL_CANDIDATES = ['gemini-3-flash-preview', 'gemini-3.1-flash-lite-preview', 'gemini-2.5-flash'];
+const AI_MODEL_LIST_TIMEOUT_MS = 10 * 1000;
+const AI_GENERATE_TIMEOUT_MS = 25 * 1000;
 
 let CONFIG = {
   SUPABASE_URL: '',
@@ -70,6 +72,15 @@ let cachedModelNames = null;
 let modelCacheAt = 0;
 const MODEL_CACHE_TTL_MS = 10 * 60 * 1000;
 
+function withTimeout(promise, timeoutMs, label) {
+  let timeoutId;
+  const timeoutPromise = new Promise((_, reject) => {
+    timeoutId = setTimeout(() => reject(new Error(`${label} 요청 시간이 초과되었습니다.`)), timeoutMs);
+  });
+
+  return Promise.race([promise, timeoutPromise]).finally(() => clearTimeout(timeoutId));
+}
+
 function parseRetryDelayMs(error) {
   const raw = error?.message || '';
   const secMatch = raw.match(/retry in\s+([\d.]+)s/i) || raw.match(/retryDelay":"(\d+)s/i);
@@ -88,24 +99,28 @@ export function getAiCooldownRemainingMs() {
   return Math.max(0, until - Date.now());
 }
 
+async function loadAvailableModelNames() {
+  const models = await genAI.models.list();
+  const names = [];
+  for await (const model of models) {
+    if (model.supportedActions && model.supportedActions.includes('generateContent')) {
+      names.push(model.name.replace('models/', ''));
+    }
+  }
+  return names;
+}
+
 async function getAvailableModelNames() {
   if (cachedModelNames && Date.now() - modelCacheAt < MODEL_CACHE_TTL_MS) return cachedModelNames;
   try {
-    const models = await genAI.models.list();
-    const names = [];
-    for await (const model of models) {
-      if (model.supportedActions && model.supportedActions.includes('generateContent')) {
-        names.push(model.name.replace('models/', ''));
-      }
-    }
+    const names = await withTimeout(loadAvailableModelNames(), AI_MODEL_LIST_TIMEOUT_MS, 'AI 모델 목록');
     cachedModelNames = names.length ? names : DEFAULT_MODEL_CANDIDATES;
-    modelCacheAt = Date.now();
-    return cachedModelNames;
   } catch (e) {
+    console.warn('[System] AI 모델 목록을 불러오지 못해 기본 모델 후보를 사용합니다.', e.message);
     cachedModelNames = DEFAULT_MODEL_CANDIDATES;
-    modelCacheAt = Date.now();
-    return cachedModelNames;
   }
+  modelCacheAt = Date.now();
+  return cachedModelNames;
 }
 
 export async function generateContentWithFallback(prompt) {
@@ -119,7 +134,11 @@ export async function generateContentWithFallback(prompt) {
   let lastError = null;
   for (const modelName of modelNames) {
     try {
-      const result = await genAI.models.generateContent({ model: modelName, contents: prompt });
+      const result = await withTimeout(
+        genAI.models.generateContent({ model: modelName, contents: prompt }),
+        AI_GENERATE_TIMEOUT_MS,
+        `${modelName} AI 생성`
+      );
       return { response: { text: () => result.text || '' } };
     } catch (error) {
       console.warn(`[AI 폴백] ${modelName} 호출 실패. 다음 모델 시도 중...`, error.message);

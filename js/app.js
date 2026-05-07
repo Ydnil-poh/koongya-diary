@@ -202,39 +202,6 @@ async function handleEmailLogin() {
   }
 }
 
-function getOAuthRedirectUrl() {
-  return `${window.location.origin}${window.location.pathname}`;
-}
-
-function consumeAuthRedirectError() {
-  const params = new URLSearchParams(window.location.search);
-  const hashParams = new URLSearchParams(window.location.hash.replace(/^#/, ''));
-  const errorDescription = params.get('error_description') || hashParams.get('error_description') || params.get('error') || hashParams.get('error');
-  if (!errorDescription) return;
-
-  showToast(`소셜 로그인 실패: ${decodeURIComponent(errorDescription)}`);
-  window.history.replaceState({}, document.title, getOAuthRedirectUrl());
-}
-
-async function handleGoogleLogin() {
-  const googleBtn = getEl('google-login-btn');
-  if (googleBtn) googleBtn.disabled = true;
-  try {
-    const { error } = await supabase.auth.signInWithOAuth({
-      provider: 'google',
-      options: {
-        redirectTo: getOAuthRedirectUrl(),
-        queryParams: { prompt: 'select_account' }
-      }
-    });
-    if (error) throw error;
-  } catch (error) {
-    console.error('구글 로그인 에러:', error);
-    showToast(`구글 로그인 실패: ${error.message || '설정을 확인해 주세요.'}`);
-    if (googleBtn) googleBtn.disabled = false;
-  }
-}
-
 async function handleLogout() {
   const logoutBtn = getEl('logout-btn');
   if (logoutBtn) logoutBtn.disabled = true;
@@ -432,6 +399,7 @@ async function handleSendMessage() {
       chatInput.disabled = false;
       chatInput.focus();
     }
+    if (getAiCooldownRemainingMs() > 0) syncAICooldownUI();
   }
 }
 
@@ -452,12 +420,12 @@ async function generateAIInsight() {
   const aiKeywordsContainer = getEl('ai-keywords');
   const regenBtn = getEl('regenerate-insight-btn');
   if (!aiKeywordsContainer) return;
-  insightGenerationInFlight = true;
-  if (regenBtn) regenBtn.disabled = true;
   if (insightCache.koongyaId === currentDbId && insightCache.content) {
     aiKeywordsContainer.innerHTML = `<div class="insight-box">${insightCache.content.replace(/\n/g, '<br>')}</div>`;
     return;
   }
+  insightGenerationInFlight = true;
+  if (regenBtn) regenBtn.disabled = true;
   aiKeywordsContainer.innerHTML = '<p>분석 중...</p>';
   try {
     const { data: logs } = await supabase
@@ -475,16 +443,18 @@ async function generateAIInsight() {
     insightCache = { koongyaId: currentDbId, content: insightText };
     aiKeywordsContainer.innerHTML = `<div class="insight-box">${insightText.replace(/\n/g, '<br>')}</div>`;
   } catch (error) {
-    if (parseCooldownSeconds(error) > 0) syncAICooldownUI();
+    const cooldownSeconds = parseCooldownSeconds(error);
+    if (cooldownSeconds > 0) syncAICooldownUI();
     console.error('AI 회고 분석 에러:', error);
-    if (error.message && error.message.includes('429')) {
-      aiKeywordsContainer.innerHTML = '<p>분석 실패: AI가 잠시 생각할 시간이 필요해요. 잠시 후 다시 시도해 주세요.</p>';
+    if (cooldownSeconds > 0 || (error.message && error.message.includes('429'))) {
+      aiKeywordsContainer.innerHTML = '<p>분석 실패: AI 요청 한도에 도달했어요. 잠시 후 다시 시도해 주세요.</p>';
     } else {
       aiKeywordsContainer.innerHTML = '<p>분석 실패: 요청 처리에 실패했어요. 잠시 후 다시 시도해 주세요.</p>';
     }
   } finally {
     insightGenerationInFlight = false;
     if (regenBtn) regenBtn.disabled = false;
+    if (getAiCooldownRemainingMs() > 0) syncAICooldownUI();
   }
 }
 
@@ -657,8 +627,6 @@ async function initApp() {
   };
 
   bindClick('email-login-btn', handleEmailLogin);
-  consumeAuthRedirectError();
-  bindClick('google-login-btn', handleGoogleLogin);
   bindClick('logout-btn', handleLogout);
   bindClick('send-btn', handleSendMessage);
   bindClick('close-chat', () => {

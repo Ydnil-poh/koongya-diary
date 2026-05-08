@@ -65,7 +65,7 @@ export const supabase = createClient(CONFIG.SUPABASE_URL, CONFIG.SUPABASE_ANON_K
   auth: { persistSession: true, autoRefreshToken: true, detectSessionInUrl: true, storageKey: 'koongya-diary-auth' }
 });
 
-const genAI = new GoogleGenAI({ apiKey: CONFIG.GEMINI_API_KEY });
+const genAI = new GoogleGenAI(CONFIG.GEMINI_API_KEY);
 
 let cachedModelNames = null;
 let modelCacheAt = 0;

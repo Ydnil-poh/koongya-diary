@@ -245,52 +245,6 @@ async function handleEmailLogin() {
   }
 }
 
-function getOAuthRedirectUrl() {
-  // 로컬 호스트나 배포 환경 모두 대응
-  const url = new URL(window.location.href);
-  url.search = '';
-  url.hash = '';
-  return url.toString().replace(/\/$/, ''); // 마지막 슬래시 제거
-}
-
-function consumeAuthRedirectError() {
-  const params = new URLSearchParams(window.location.search);
-  const hashParams = new URLSearchParams(window.location.hash.replace(/^#/, ''));
-  
-  const error = params.get('error') || hashParams.get('error');
-  const errorDescription = params.get('error_description') || hashParams.get('error_description');
-  
-  if (!error) return;
-
-  console.error('[Auth Error]', error, errorDescription);
-  
-  if (errorDescription?.includes('configuration_not_found') || error === 'unauthorized_client') {
-    showToast('구글 로그인 설정이 완료되지 않았습니다. Supabase 설정을 확인해 주세요.');
-  } else {
-    showToast(`로그인 실패: ${decodeURIComponent(errorDescription || error)}`);
-  }
-  
-  window.history.replaceState({}, document.title, getOAuthRedirectUrl());
-}
-
-async function handleGoogleLogin() {
-  const googleBtn = getEl('google-login-btn');
-  if (googleBtn) googleBtn.disabled = true;
-  try {
-    const { error } = await supabase.auth.signInWithOAuth({
-      provider: 'google',
-      options: {
-        redirectTo: getOAuthRedirectUrl(),
-        queryParams: { prompt: 'select_account' }
-      }
-    });
-    if (error) throw error;
-  } catch (error) {
-    console.error('구글 로그인 에러:', error);
-    showToast(`구글 로그인 실패: ${error.message || '설정을 확인해 주세요.'}`);
-    if (googleBtn) googleBtn.disabled = false;
-  }
-}
 
 async function handleLogout() {
   const logoutBtn = getEl('logout-btn');
@@ -388,7 +342,7 @@ async function openChatPanel(cell) {
     // 2. 대화 기록 및 스트리밍 영역 초기화
     const chatLog = getEl('chat-log');
     chatLog.innerHTML = "<p style='text-align:center; color:#999;'>기록을 불러오는 중...</p>";
-    getEl('active-message-text').innerText = `${currentKoongyaName}야 안녕?`;
+    getEl('active-message-text').innerText = '';
 
     // 3. 기록 로드 및 뷰 전환
     await loadChatHistory(currentDbId);
@@ -744,8 +698,6 @@ async function initApp() {
   };
 
   bindClick('email-login-btn', handleEmailLogin);
-  consumeAuthRedirectError();
-  bindClick('google-login-btn', handleGoogleLogin);
   bindClick('logout-btn', handleLogout);
   bindClick('send-btn', handleSendMessage);
   

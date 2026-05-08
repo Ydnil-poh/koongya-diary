@@ -12,6 +12,23 @@ let CONFIG = {
 };
 
 async function initializeConfig() {
+  // 1. 서버(Vercel)에서 최신 설정 가져오기 시도
+  try {
+    const response = await fetch('/api/config');
+    if (response.ok) {
+      const serverConfig = await response.json();
+      if (serverConfig.GEMINI_API_KEY && serverConfig.GEMINI_API_KEY.trim() !== '') {
+        CONFIG = serverConfig;
+        localStorage.setItem('koongya_config', JSON.stringify(CONFIG));
+        console.log('[System] 서버(Vercel)에서 최신 설정을 로드했습니다.');
+        return;
+      }
+    }
+  } catch (e) {
+    console.warn('[System] 서버 API 호출 실패, 캐시를 확인합니다.');
+  }
+
+  // 2. 서버 호출 실패 시 로컬 캐시 확인
   const cachedConfig = localStorage.getItem('koongya_config');
   if (cachedConfig) {
     try {
@@ -19,6 +36,7 @@ async function initializeConfig() {
       if (parsed.GEMINI_API_KEY && parsed.GEMINI_API_KEY.trim() !== '') {
         CONFIG = parsed;
         console.log('[System] 캐시된 설정을 로드했습니다.');
+        return;
       } else {
         localStorage.removeItem('koongya_config');
       }
@@ -27,19 +45,19 @@ async function initializeConfig() {
     }
   }
 
+  // 3. 캐시도 없으면 로컬 config.js 폴백
   if (!CONFIG.GEMINI_API_KEY) {
     try {
       const module = await import('../config.js');
       if (module.CONFIG && module.CONFIG.GEMINI_API_KEY) {
         CONFIG = module.CONFIG;
-        localStorage.setItem('koongya_config', JSON.stringify(CONFIG));
+        console.log('[System] 로컬 config.js에서 설정을 로드했습니다.');
       }
     } catch (e) {
-      console.error('[System] 설정을 로드하는 데 실패했습니다.');
+      console.error('[System] 유효한 설정을 찾을 수 없습니다.');
     }
   }
 }
-
 await initializeConfig();
 
 export const supabase = createClient(CONFIG.SUPABASE_URL, CONFIG.SUPABASE_ANON_KEY, {

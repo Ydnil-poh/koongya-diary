@@ -366,15 +366,14 @@ body {
 }
 
 .dialogue-label {
-    position: absolute;
-    top: -12px;
-    left: 20px;
+    display: inline-block;
     background: #6d4c41;
-    padding: 2px 10px;
-    font-size: 0.8rem;
+    padding: 4px 12px;
+    font-size: 0.85rem;
     color: #fff;
     border-radius: 4px;
     font-family: 'Binggrae', sans-serif;
+    margin-bottom: 15px;
 }
 
 .streaming-text {

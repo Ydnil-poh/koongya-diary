@@ -470,23 +470,23 @@ async function generateAIInsight() {
   
   if (getAiCooldownRemainingMs() > 0) {
     syncAICooldownUI();
+    getEl('active-message-text').innerHTML = '<p class="status-text">쿵야가 조금 지쳤나봐요. 잠시 후 다시 부탁해 주세요.</p>';
     return;
   }
 
-  const aiKeywordsContainer = getEl('ai-keywords');
   const regenBtn = getEl('regenerate-insight-btn');
-  if (!aiKeywordsContainer) return;
-
+  const targetArea = getEl('active-message-text');
+  
   try {
     insightGenerationInFlight = true;
     if (regenBtn) regenBtn.disabled = true;
 
     if (insightCache.koongyaId === currentDbId && insightCache.content) {
-      aiKeywordsContainer.innerHTML = `<div class="insight-box">${insightCache.content.replace(/\n/g, '<br>')}</div>`;
+      if (targetArea) targetArea.innerHTML = `<div class="insight-box">${insightCache.content.replace(/\n/g, '<br>')}</div>`;
       return;
     }
 
-    aiKeywordsContainer.innerHTML = '<p class="status-text">쿵야가 대화를 분석하고 있어요...</p>';
+    if (targetArea) targetArea.innerHTML = '<p class="status-text">쿵야가 대화를 정리하고 있어요...</p>';
 
     const { data: logs, error: logsError } = await supabase
       .from('chat_logs')
@@ -512,7 +512,7 @@ async function generateAIInsight() {
     
     // 통합된 UI: 좌측 하단 스트리밍 영역에 인사이트 출력
     getEl('dialogue-label').innerText = '쿵야의 정리';
-    getEl('active-message-text').innerHTML = `<div class="insight-box">${insightText.replace(/\n/g, '<br>')}</div>`;
+    if (targetArea) targetArea.innerHTML = `<div class="insight-box">${insightText.replace(/\n/g, '<br>')}</div>`;
 
   } catch (error) {
     console.error('[Insight] 에러:', error);

@@ -3,6 +3,7 @@ import { GoogleGenAI } from 'https://esm.run/@google/genai';
 
 const AI_COOLDOWN_UNTIL_KEY = 'koongya_ai_cooldown_until';
 const DEFAULT_MODEL_CANDIDATES = ['gemini-3-flash-preview', 'gemini-3.1-flash-lite-preview', 'gemini-2.5-flash'];
+const REQUEST_TIMEOUT_MS = 25000; // 25초 타임아웃
 
 let CONFIG = {
   SUPABASE_URL: '',
@@ -109,7 +110,6 @@ async function getAvailableModelNames() {
 }
 
 export async function generateContentWithFallback(prompt) {
-  // 요청 큐를 저장/재전송하지 않습니다. 각 호출은 즉시 실행되고, 429면 즉시 종료합니다.
   const cooldownMs = getAiCooldownRemainingMs();
   if (cooldownMs > 0) {
     throw new Error(`AI_COOLDOWN:${Math.ceil(cooldownMs / 1000)}`);
@@ -117,21 +117,58 @@ export async function generateContentWithFallback(prompt) {
 
   const modelNames = await getAvailableModelNames();
   let lastError = null;
+
   for (const modelName of modelNames) {
+    console.log(`[AI] ${modelName} 모델로 요청 중...`);
     try {
-      const result = await genAI.models.generateContent({ model: modelName, contents: prompt });
-      return { response: { text: () => result.text || '' } };
+      const model = genAI.getGenerativeModel({ model: modelName });
+      const result = await model.generateContent(prompt);
+      return { response: { text: () => result.response.text() || '' } };
     } catch (error) {
-      console.warn(`[AI 폴백] ${modelName} 호출 실패. 다음 모델 시도 중...`, error.message);
+      console.warn(`[AI] ${modelName} 호출 실패:`, error.message);
       lastError = error;
 
       if (error.status === 429 || error.message.includes('429') || error.message.includes('quota')) {
-        console.warn('[System] API 요청 한도 초과. 폴백을 중단합니다.');
         const retryMs = parseRetryDelayMs(error) || 60 * 1000;
-        const until = setAiCooldown(retryMs);
-        const cooldownError = new Error(`AI_COOLDOWN:${Math.ceil((until - Date.now()) / 1000)}`);
-        cooldownError.cause = error;
-        throw cooldownError;
+        setAiCooldown(retryMs);
+        throw new Error(`AI_COOLDOWN:${Math.ceil(retryMs / 1000)}`);
+      }
+    }
+  }
+  throw lastError || new Error('모든 AI 모델 호출에 실패했습니다.');
+}
+
+export async function* generateContentStreamWithFallback(prompt) {
+  const cooldownMs = getAiCooldownRemainingMs();
+  if (cooldownMs > 0) {
+    throw new Error(`AI_COOLDOWN:${Math.ceil(cooldownMs / 1000)}`);
+  }
+
+  const modelNames = await getAvailableModelNames();
+  let lastError = null;
+
+  for (const modelName of modelNames) {
+    console.log(`[AI-Stream] ${modelName} 모델로 스트리밍 요청 중...`);
+    try {
+      const model = genAI.getGenerativeModel({ model: modelName });
+      const result = await model.generateContentStream(prompt);
+      
+      for await (const chunk of result.stream) {
+        const chunkText = chunk.text();
+        if (chunkText) {
+          yield chunkText;
+        }
+      }
+      return; 
+
+    } catch (error) {
+      console.warn(`[AI-Stream] ${modelName} 호출 실패:`, error.message);
+      lastError = error;
+
+      if (error.status === 429 || error.message.includes('429') || error.message.includes('quota')) {
+        const retryMs = parseRetryDelayMs(error) || 60 * 1000;
+        setAiCooldown(retryMs);
+        throw new Error(`AI_COOLDOWN:${Math.ceil(retryMs / 1000)}`);
       }
     }
   }

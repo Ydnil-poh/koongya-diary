@@ -158,15 +158,27 @@ body {
     100% { opacity: 0; visibility: hidden; }
 }
 
+/* ==========================================
+   4. 뷰 전환 및 정원 컨테이너
+========================================== */
+#garden-view, #chat-view {
+    width: 100%;
+    height: 100vh;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    align-items: center;
+    position: relative;
+    overflow: hidden;
+}
+
 .garden-container {
     perspective: 1200px;
-    display: none; /* 초기에는 숨김 */
     opacity: 0;
     transition: opacity 0.5s ease-in;
 }
 
 .garden-container.visible {
-    display: block;
     opacity: 1;
 }
 
@@ -276,93 +288,178 @@ body {
 }
 
 /* ==========================================
-   6. 대화 패널
+   6. 비주얼 대화 뷰 (와이드 3분할)
 ========================================== */
-#chat-panel {
-    position: absolute;
-    bottom: 20px;
-    right: 20px;
-    width: 380px;
-    height: 550px;
-    max-height: 80vh;
-    background: white;
-    border: 1px solid #ddd;
-    padding: 20px;
-    box-shadow: 0 10px 30px rgba(0, 0, 0, 0.1);
-    z-index: 1500; /* 정원(1) 및 다른 요소보다 높게 설정 */
-    display: flex;
-    flex-direction: column;
-    border-radius: 24px;
+#chat-view {
+    background-color: #fdfaf5; /* 고전 웹 느낌의 미색 배경 */
 }
 
-.chat-header {
-    font-weight: bold;
-    border-bottom: 1px solid #eee;
-    padding-bottom: 12px;
-    margin-bottom: 15px;
+.chat-container-wide {
+    width: 95vw;
+    height: 90vh;
+    display: flex;
+    gap: 20px;
+    background: #fff;
+    border: 3px solid #6d4c41;
+    border-radius: 12px;
+    box-shadow: 8px 8px 0px rgba(109, 76, 65, 0.2);
+    padding: 20px;
+    box-sizing: border-box;
+}
+
+/* 좌측 컬럼: 캐릭터 & 현재 답변 */
+.chat-left-column {
+    flex: 4;
+    display: flex;
+    flex-direction: column;
+    gap: 15px;
+}
+
+.character-display-area {
+    flex: 6;
+    background: #f1f8e9;
+    border: 2px solid #8bc34a;
+    border-radius: 8px;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    align-items: center;
+    position: relative;
+    overflow: hidden;
+}
+
+#chat-koongya-visual-frame {
+    flex-grow: 1;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+#chat-koongya-img {
+    width: 200px; /* 해상도 고려한 적정 크기 */
+    image-rendering: pixelated;
+    filter: drop-shadow(0 4px 8px rgba(0,0,0,0.1));
+}
+
+.character-status {
+    width: 100%;
+    background: #8bc34a;
+    color: white;
+    padding: 5px 0;
+    text-align: center;
+    font-size: 0.9rem;
+}
+
+/* 쿵야의 실시간 답변 영역 */
+.active-dialogue-area {
+    flex: 4;
+    background: #333;
+    color: #fff;
+    padding: 20px;
+    border-radius: 8px;
+    border: 4px solid #555;
+    position: relative;
+    font-family: 'RIDIBatang', serif;
+    font-size: 1.1rem;
+    line-height: 1.6;
+    overflow-y: auto;
+}
+
+.dialogue-label {
+    position: absolute;
+    top: -12px;
+    left: 20px;
+    background: #6d4c41;
+    padding: 2px 10px;
+    font-size: 0.8rem;
+    color: #fff;
+    border-radius: 4px;
+    font-family: 'Binggrae', sans-serif;
+}
+
+.streaming-text {
+    white-space: pre-wrap;
+}
+
+/* 우측 컬럼: 전체 기록 & 입력 */
+.chat-right-column {
+    flex: 6;
+    display: flex;
+    flex-direction: column;
+    gap: 15px;
+    border-left: 1px solid #eee;
+    padding-left: 20px;
+}
+
+.chat-history-header {
     display: flex;
     justify-content: space-between;
+    align-items: center;
+    font-weight: bold;
+    color: #6d4c41;
+    border-bottom: 2px solid #8bc34a;
+    padding-bottom: 10px;
 }
 
-.chat-log {
+.chat-view-buttons {
+    display: flex;
+    gap: 8px;
+}
+
+.chat-history-log {
     flex-grow: 1;
     overflow-y: auto;
-    margin-bottom: 15px;
-    font-size: 1rem;
     display: flex;
     flex-direction: column;
-    gap: 14px;
-    padding-right: 8px;
+    gap: 8px;
+    padding-right: 10px;
+    font-size: 0.95rem;
 }
 
-.chat-bubble {
-    max-width: 85%;
-    padding: 12px 16px;
-    border-radius: 18px;
-    position: relative;
-    word-break: break-word;
-    line-height: 1.6;
+/* 말풍선 대신 텍스트 리스트 스타일 */
+.chat-log-item {
+    padding: 4px 0;
+    border-bottom: 1px solid #f9f9f9;
 }
 
-.chat-bubble-user {
-    align-self: flex-end;
-    background-color: #8bc34a;
-    color: white;
-    border-top-right-radius: 4px;
+.chat-log-name {
+    font-weight: bold;
+    margin-right: 8px;
 }
 
-.chat-bubble-ai {
-    align-self: flex-start;
-    background-color: #f0f0f0;
-    color: #333;
-    border-top-left-radius: 4px;
-}
+.chat-log-name.ai { color: #2e7d32; }
+.chat-log-name.user { color: #1565c0; }
 
-
-.chat-bubble-user-failed {
-    background-color: #b8b8b8;
-}
-
-.chat-bubble-status {
-    margin-top: 6px;
-    font-size: 0.78rem;
-    opacity: 0.9;
-}
-
-.chat-input-area {
+.chat-input-section {
     display: flex;
     gap: 10px;
-    padding-top: 15px;
-    border-top: 1px solid #eee;
+    height: 100px;
 }
 
-.chat-input-area input {
+.chat-input-section textarea {
     flex-grow: 1;
-    font-family: 'Binggrae', sans-serif;
-    padding: 10px;
-    border: 1px solid #ddd;
+    padding: 12px;
+    border: 2px solid #ddd;
     border-radius: 8px;
+    resize: none;
+    font-family: 'Binggrae', sans-serif;
+    font-size: 1rem;
     outline: none;
+    transition: border-color 0.2s;
+}
+
+.chat-input-section textarea:focus {
+    border-color: #8bc34a;
+}
+
+.chat-input-section button {
+    width: 80px;
+    background: #8bc34a;
+    color: white;
+    border: none;
+    border-radius: 8px;
+    font-weight: bold;
+    cursor: pointer;
 }
 
 /* ==========================================

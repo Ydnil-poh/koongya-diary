@@ -1,5 +1,5 @@
 import { KOONGYA_ORDER, getKoongyaById, getKoongyaImagePath, normalizeKoongyaId } from './data/koongyas.js';
-import { supabase, generateContentWithFallback, getAiCooldownRemainingMs } from './services/clients.js';
+import { supabase, generateContentWithFallback, generateContentStreamWithFallback, getAiCooldownRemainingMs } from './services/clients.js';
 import {
   getEl,
   showToast,
@@ -76,52 +76,72 @@ function parseCooldownSeconds(error) {
 
 
 function syncAICooldownUI() {
-  const remaining = Math.ceil(getAiCooldownRemainingMs() / 1000);
+  const remainingMs = getAiCooldownRemainingMs();
+  const remainingSec = Math.ceil(remainingMs / 1000);
+  
   const sendBtn = getEl('send-btn');
   const retroBtn = getEl('retrospective-btn');
   const regenBtn = getEl('regenerate-insight-btn');
   const saveBtn = getEl('save-diary-btn');
-  const disabled = remaining > 0;
+  
+  const isDisabled = remainingMs > 0;
+
+  // 버튼 상태 업데이트
   [sendBtn, retroBtn, regenBtn, saveBtn].forEach((btn) => {
-    if (btn) btn.disabled = disabled;
+    if (btn) btn.disabled = isDisabled;
   });
+
+  // 토스트 알림 (너무 자주 뜨지 않게 인터벌 체크)
   const now = Date.now();
-  if (disabled && now - lastCooldownToastAt >= COOLDOWN_TOAST_INTERVAL_MS) {
-    showToast(`AI 요청 대기 중이에요. ${remaining}초 후 다시 시도해 주세요.`);
+  if (isDisabled && now - lastCooldownToastAt >= COOLDOWN_TOAST_INTERVAL_MS) {
+    showToast(`AI 요청 대기 중이에요. ${remainingSec}초 후 다시 시도해 주세요.`);
     lastCooldownToastAt = now;
   }
+
+  // 타이머 관리
   if (aiCooldownTimer) clearTimeout(aiCooldownTimer);
-  if (disabled) aiCooldownTimer = setTimeout(syncAICooldownUI, 1000);
-  if (!disabled) lastCooldownToastAt = 0;
-}
-
-
-function appendChatBubble(chatLog, text, role, options = {}) {
-  if (!chatLog) return null;
-  const bubble = document.createElement('div');
-  bubble.className = `chat-bubble ${role === 'user' ? 'chat-bubble-user' : 'chat-bubble-ai'}`;
-  bubble.textContent = text;
-  if (options.pendingAiReply) bubble.dataset.pendingAiReply = 'true';
-  if (options.failedAiReply) bubble.classList.add('chat-bubble-user-failed');
-  if (options.statusText) {
-    const status = document.createElement('div');
-    status.className = 'chat-bubble-status';
-    status.textContent = options.statusText;
-    bubble.appendChild(status);
+  if (isDisabled) {
+    aiCooldownTimer = setTimeout(syncAICooldownUI, 1000);
+  } else {
+    aiCooldownTimer = null;
+    lastCooldownToastAt = 0;
   }
-  chatLog.appendChild(bubble);
-  chatLog.scrollTop = chatLog.scrollHeight;
-  return bubble;
 }
 
-function markUserBubbleAiReplyFailed(bubble) {
-  if (!bubble || bubble.dataset.pendingAiReply !== 'true') return;
-  bubble.dataset.pendingAiReply = 'false';
-  bubble.classList.add('chat-bubble-user-failed');
-  const status = document.createElement('div');
-  status.className = 'chat-bubble-status';
-  status.textContent = '전송 완료 · 답변 생성 실패 (재전송 불필요)';
-  bubble.appendChild(status);
+
+function switchView(viewName) {
+  const gardenView = getEl('garden-view');
+  const chatView = getEl('chat-view');
+  
+  if (viewName === 'chat') {
+    if (gardenView) gardenView.classList.add('hidden');
+    if (chatView) chatView.classList.remove('hidden');
+    sessionStorage.setItem('koongya_current_view', 'chat');
+  } else {
+    if (chatView) chatView.classList.add('hidden');
+    if (gardenView) gardenView.classList.remove('hidden');
+    sessionStorage.removeItem('koongya_current_view');
+    sessionStorage.removeItem('koongya_current_db_id');
+  }
+}
+
+function appendChatLogItem(chatLog, text, sender) {
+  if (!chatLog) return;
+  const item = document.createElement('div');
+  item.className = 'chat-log-item';
+  
+  const nameSpan = document.createElement('span');
+  nameSpan.className = `chat-log-name ${sender === 'user' ? 'user' : 'ai'}`;
+  nameSpan.textContent = sender === 'user' ? '나' : currentKoongyaName;
+  
+  const textSpan = document.createElement('span');
+  textSpan.className = 'chat-log-text';
+  textSpan.textContent = `: ${text}`;
+  
+  item.appendChild(nameSpan);
+  item.appendChild(textSpan);
+  chatLog.appendChild(item);
+  chatLog.scrollTop = chatLog.scrollHeight;
 }
 async function updateUnlockedList() {
   if (!currentUser) return;
@@ -158,8 +178,31 @@ async function updateUIForAuth(session) {
     }
     if (topControls) topControls.classList.remove('hidden');
     else if (archiveBtn) archiveBtn.classList.remove('hidden');
+    
     loadGardenFromLocal(renderGarden);
     await Promise.all([loadActiveKoongyas(), updateUnlockedList()]);
+    
+    // 뷰 복구 로직
+    const savedView = sessionStorage.getItem('koongya_current_view');
+    const savedDbId = sessionStorage.getItem('koongya_current_db_id');
+    
+    if (savedView === 'chat' && savedDbId) {
+      const welcome = getEl('welcome-message');
+      if (welcome) welcome.style.display = 'none';
+
+      // 저장된 ID에 해당하는 셀을 찾아서 채팅창 열기 시도
+      setTimeout(() => {
+        const cells = document.querySelectorAll('.cell');
+        const targetCell = Array.from(cells).find(c => c.getAttribute('data-db-id') === savedDbId);
+        if (targetCell) {
+          openChatPanel(targetCell);
+        } else {
+          switchView('garden');
+        }
+      }, 500); // 그리드 렌더링 대기
+    } else {
+      switchView('garden');
+    }
   } else {
     currentUser = null;
     if (loginScreen) {
@@ -203,16 +246,30 @@ async function handleEmailLogin() {
 }
 
 function getOAuthRedirectUrl() {
-  return `${window.location.origin}${window.location.pathname}`;
+  // 로컬 호스트나 배포 환경 모두 대응
+  const url = new URL(window.location.href);
+  url.search = '';
+  url.hash = '';
+  return url.toString().replace(/\/$/, ''); // 마지막 슬래시 제거
 }
 
 function consumeAuthRedirectError() {
   const params = new URLSearchParams(window.location.search);
   const hashParams = new URLSearchParams(window.location.hash.replace(/^#/, ''));
-  const errorDescription = params.get('error_description') || hashParams.get('error_description') || params.get('error') || hashParams.get('error');
-  if (!errorDescription) return;
+  
+  const error = params.get('error') || hashParams.get('error');
+  const errorDescription = params.get('error_description') || hashParams.get('error_description');
+  
+  if (!error) return;
 
-  showToast(`소셜 로그인 실패: ${decodeURIComponent(errorDescription)}`);
+  console.error('[Auth Error]', error, errorDescription);
+  
+  if (errorDescription?.includes('configuration_not_found') || error === 'unauthorized_client') {
+    showToast('구글 로그인 설정이 완료되지 않았습니다. Supabase 설정을 확인해 주세요.');
+  } else {
+    showToast(`로그인 실패: ${decodeURIComponent(errorDescription || error)}`);
+  }
+  
   window.history.replaceState({}, document.title, getOAuthRedirectUrl());
 }
 
@@ -322,13 +379,24 @@ async function openChatPanel(cell) {
     const koongyaData = getKoongyaById(currentKoongyaId);
     currentKoongyaName = koongyaData ? koongyaData.name : '쿵야';
 
-    getEl('chat-koongya-name').innerText = currentKoongyaName;
-    const chatLog = getEl('chat-log');
-    chatLog.innerHTML = "<p style='text-align:center; color:#999;'>불러오는 중...</p>";
+    // 1. 캐릭터 비주얼 업데이트
+    const imgEl = getEl('chat-koongya-img');
+    if (imgEl) imgEl.src = getKoongyaImagePath(currentKoongyaId, currentStep);
+    getEl('chat-koongya-name-display').innerText = currentKoongyaName;
+    getEl('chat-koongya-step').innerText = currentStep;
 
+    // 2. 대화 기록 및 스트리밍 영역 초기화
+    const chatLog = getEl('chat-log');
+    chatLog.innerHTML = "<p style='text-align:center; color:#999;'>기록을 불러오는 중...</p>";
+    getEl('active-message-text').innerText = `${currentKoongyaName}야 안녕?`;
+
+    // 3. 기록 로드 및 뷰 전환
     await loadChatHistory(currentDbId);
-    updateRetroButtonVisibility().catch((e) => console.error(e));
-    getEl('chat-panel').classList.remove('hidden');
+    updateRetroButtonVisibility().catch(console.error);
+    
+    switchView('chat');
+    sessionStorage.setItem('koongya_current_db_id', currentDbId);
+
   } catch (err) {
     console.error('채팅창 열기 에러:', err);
   }
@@ -355,7 +423,7 @@ async function loadChatHistory(dbId) {
   if (data) {
     chatLog.innerHTML = '';
     data.forEach((log) => {
-      appendChatBubble(chatLog, log.message, log.sender === 'user' ? 'user' : 'ai');
+      appendChatLogItem(chatLog, log.message, log.sender === 'user' ? 'user' : 'ai');
     });
     chatLog.scrollTop = chatLog.scrollHeight;
   }
@@ -366,14 +434,14 @@ async function handleSendMessage() {
     syncAICooldownUI();
     return;
   }
+  
   const chatInput = getEl('chat-input');
   const chatLog = getEl('chat-log');
-  const loadingUI = getEl('chat-loading');
+  const activeMessageText = getEl('active-message-text');
+  const loadingDots = getEl('chat-loading-dots');
   const sendBtn = getEl('send-btn');
 
   const targetDbId = currentDbId;
-  const targetKoongyaId = currentKoongyaId;
-  const targetKoongyaName = currentKoongyaName;
   const sessionUser = currentUser;
 
   if (!chatInput || !chatLog || !sessionUser) {
@@ -384,50 +452,50 @@ async function handleSendMessage() {
   const message = clipText(chatInput.value.trim(), AI_LIMITS.MAX_MESSAGE_CHARS);
   if (!message) return;
 
-  if (sendBtn) sendBtn.disabled = true;
-  if (chatInput) chatInput.disabled = true;
-
-  await saveChatLog(targetDbId, 'user', message);
-  insightCache = { koongyaId: null, content: null };
-
-  let pendingUserBubble = null;
-  if (currentDbId === targetDbId) {
-    pendingUserBubble = appendChatBubble(chatLog, message, 'user', { pendingAiReply: true });
-    if (loadingUI) loadingUI.classList.remove('hidden');
-  }
-
-  chatInput.value = '';
-  updateRetroButtonVisibility().catch((e) => console.error(e));
-
   try {
-    const { data: koongyaDataDb } = await supabase.from('active_koongyas').select('diary_content').eq('id', targetDbId).single();
+    if (sendBtn) sendBtn.disabled = true;
+    if (chatInput) chatInput.disabled = true;
 
+    // 1. 유저 메시지 저장 및 로그 업데이트
+    await saveChatLog(targetDbId, 'user', message);
+    appendChatLogItem(chatLog, message, 'user');
+    chatInput.value = '';
+    insightCache = { koongyaId: null, content: null };
+
+    // 2. AI 대기 UI
+    if (activeMessageText) activeMessageText.innerText = '';
+    if (loadingDots) loadingDots.classList.remove('hidden');
+
+    // 3. AI 스트리밍 답변 생성
+    const { data: koongyaDataDb } = await supabase.from('active_koongyas').select('diary_content').eq('id', targetDbId).single();
     let diaryContext = '';
-    if (koongyaDataDb && koongyaDataDb.diary_content) {
-      diaryContext = `[사용자의 이전 일기 요약]\n"${clipText(koongyaDataDb.diary_content, AI_LIMITS.MAX_DIARY_CHARS)}"\n이 내용을 기억하고 공감하는 뉘앙스를 조금 섞어서 대화해.\n\n`;
+    if (koongyaDataDb?.diary_content) {
+      diaryContext = `[이전 일기 요약]\n"${clipText(koongyaDataDb.diary_content, AI_LIMITS.MAX_DIARY_CHARS)}"\n\n`;
     }
 
     const systemPrompt = buildCoachingGuide();
-    const result = await generateContentWithFallback(`${systemPrompt}\n\n${diaryContext}[현재 대화]\n사용자: "${message}"\n코치:`);
-    const responseText = result.response.text();
-
-    await saveChatLog(targetDbId, 'ai', responseText);
-
-    if (currentDbId === targetDbId) {
-      if (pendingUserBubble) pendingUserBubble.dataset.pendingAiReply = 'false';
-      if (loadingUI) loadingUI.classList.add('hidden');
-      appendChatBubble(chatLog, responseText, 'ai');
-      updateRetroButtonVisibility().catch((e) => console.error(e));
-    } else {
-      showToast(`${targetKoongyaName} 쿵야가 답장을 보냈어요!`);
+    const stream = generateContentStreamWithFallback(`${systemPrompt}\n\n${diaryContext}[현재 대화]\n사용자: "${message}"\n코치:`);
+    
+    if (loadingDots) loadingDots.classList.add('hidden');
+    
+    let fullResponse = '';
+    for await (const chunk of stream) {
+      fullResponse += chunk;
+      if (activeMessageText) activeMessageText.innerText = fullResponse;
     }
+
+    // 4. 최종 답변 저장 및 로그 추가
+    await saveChatLog(targetDbId, 'ai', fullResponse);
+    appendChatLogItem(chatLog, fullResponse, 'ai');
+    updateRetroButtonVisibility().catch(console.error);
+
   } catch (error) {
+    console.error('[Chat] 에러:', error);
     if (parseCooldownSeconds(error) > 0) syncAICooldownUI();
-    if (currentDbId === targetDbId && loadingUI) loadingUI.classList.add('hidden');
-    markUserBubbleAiReplyFailed(pendingUserBubble);
-    showToast('메시지는 저장되었어요. 재전송 없이 새 메시지를 보내거나 잠시 후 다시 시도해 주세요.');
+    if (loadingDots) loadingDots.classList.add('hidden');
+    showToast(error.message === 'TIMEOUT' ? '응답 시간이 초과되었습니다.' : '오류가 발생했습니다.');
   } finally {
-    if (sendBtn) sendBtn.disabled = false;
+    if (sendBtn && getAiCooldownRemainingMs() <= 0) sendBtn.disabled = false;
     if (chatInput) {
       chatInput.disabled = false;
       chatInput.focus();
@@ -445,46 +513,64 @@ async function saveChatLog(dbId, sender, message) {
 
 async function generateAIInsight() {
   if (insightGenerationInFlight) return;
+  
   if (getAiCooldownRemainingMs() > 0) {
     syncAICooldownUI();
     return;
   }
+
   const aiKeywordsContainer = getEl('ai-keywords');
   const regenBtn = getEl('regenerate-insight-btn');
   if (!aiKeywordsContainer) return;
-  insightGenerationInFlight = true;
-  if (regenBtn) regenBtn.disabled = true;
-  if (insightCache.koongyaId === currentDbId && insightCache.content) {
-    aiKeywordsContainer.innerHTML = `<div class="insight-box">${insightCache.content.replace(/\n/g, '<br>')}</div>`;
-    return;
-  }
-  aiKeywordsContainer.innerHTML = '<p>분석 중...</p>';
+
   try {
-    const { data: logs } = await supabase
+    insightGenerationInFlight = true;
+    if (regenBtn) regenBtn.disabled = true;
+
+    if (insightCache.koongyaId === currentDbId && insightCache.content) {
+      aiKeywordsContainer.innerHTML = `<div class="insight-box">${insightCache.content.replace(/\n/g, '<br>')}</div>`;
+      return;
+    }
+
+    aiKeywordsContainer.innerHTML = '<p class="status-text">쿵야가 대화를 분석하고 있어요...</p>';
+
+    const { data: logs, error: logsError } = await supabase
       .from('chat_logs')
       .select('sender, message')
       .eq('koongya_id', currentDbId)
       .order('created_at', { ascending: false })
       .limit(AI_LIMITS.RETRO_HISTORY_LIMIT);
+
+    if (logsError) throw logsError;
+
     const chatContext = buildInsightContext((logs || []).reverse());
     const systemPrompt = buildInsightGuide();
+    
+    console.log('[Insight] AI 분석 요청 시작');
     const result = await generateContentWithFallback(
-      `${systemPrompt}\n\n[대화 기록(최근 핵심 발화 요약본)]\n${chatContext}\n\n[요청]\n대화를 관통하는 주제를 하나로 묶어 2~3문장 코멘트 + 글감을 확장할 질문 1개를 제시해줘.`
+      `${systemPrompt}\n\n[대화 기록]\n${chatContext}\n\n[요청]\n대화를 요약하고 질문을 던져줘.`
     );
+    
     const insightText = result.response.text();
+    console.log('[Insight] AI 분석 완료');
+    
     insightCache = { koongyaId: currentDbId, content: insightText };
     aiKeywordsContainer.innerHTML = `<div class="insight-box">${insightText.replace(/\n/g, '<br>')}</div>`;
+
   } catch (error) {
-    if (parseCooldownSeconds(error) > 0) syncAICooldownUI();
-    console.error('AI 회고 분석 에러:', error);
-    if (error.message && error.message.includes('429')) {
-      aiKeywordsContainer.innerHTML = '<p>분석 실패: AI가 잠시 생각할 시간이 필요해요. 잠시 후 다시 시도해 주세요.</p>';
+    console.error('[Insight] 에러:', error);
+    if (parseCooldownSeconds(error) > 0) {
+      syncAICooldownUI();
+      aiKeywordsContainer.innerHTML = '<p class="status-text">AI 요청 한도 초과. 잠시 후 다시 시도해 주세요.</p>';
     } else {
-      aiKeywordsContainer.innerHTML = '<p>분석 실패: 요청 처리에 실패했어요. 잠시 후 다시 시도해 주세요.</p>';
+      aiKeywordsContainer.innerHTML = '<p class="status-text">분석에 실패했어요. 다시 시도해 주세요.</p>';
+      showToast('분석 실패: ' + (error.message || '알 수 없는 오류'));
     }
   } finally {
     insightGenerationInFlight = false;
-    if (regenBtn) regenBtn.disabled = false;
+    if (regenBtn && getAiCooldownRemainingMs() <= 0) {
+      regenBtn.disabled = false;
+    }
   }
 }
 
@@ -553,22 +639,25 @@ async function saveDiaryAndEvolve() {
     syncAICooldownUI();
     return;
   }
+  
   const saveBtn = getEl('save-diary-btn');
-  const diaryContent = clipText(getEl('diary-input').value, 2000);
+  const diaryInput = getEl('diary-input');
+  const diaryContent = clipText(diaryInput?.value || '', 2000);
   const retroPanel = getEl('retrospective-panel');
 
   if (!diaryContent) {
     showToast('일기를 먼저 작성해 주세요!');
     return;
   }
-  if (saveBtn) saveBtn.disabled = true;
-
-  const targetDbId = currentDbId;
-  const targetKoongyaId = currentKoongyaId;
-  const targetKoongyaName = currentKoongyaName;
 
   try {
+    if (saveBtn) saveBtn.disabled = true;
+
+    const targetDbId = currentDbId;
+    const targetKoongyaName = currentKoongyaName;
+
     if (currentStep === 5) {
+      console.log('[Evolve] 졸업 프로세스 시작');
       await processGraduation(diaryContent);
     } else {
       if (retroPanel) retroPanel.classList.add('hidden');
@@ -583,33 +672,31 @@ async function saveDiaryAndEvolve() {
 
 이 회고록의 핵심을 1~2문장으로 코멘트하고, 다음 회고를 더 길게 쓸 수 있도록 생각 확장 질문 1개를 함께 제시해 줘.`;
 
+      console.log('[Evolve] AI 진화 메시지 생성 중...');
       const result = await generateContentWithFallback(prompt);
       const aiGreeting = result.response.text();
+      console.log('[Evolve] AI 진화 메시지 완료');
 
       await supabase.from('active_koongyas').update({ current_step: nextStep, diary_content: diaryContent }).eq('id', targetDbId);
-
       await saveChatLog(targetDbId, 'ai', aiGreeting);
+      
       insightCache = { koongyaId: null, content: null };
-
       showToast(`🎉 ${targetKoongyaName} 쿵야가 ${nextStep}단계로 진화했습니다!`);
 
       await loadActiveKoongyas();
     }
   } catch (error) {
-    console.error('진화 에러:', error);
+    console.error('[Evolve] 에러 발생:', error);
+    if (parseCooldownSeconds(error) > 0) syncAICooldownUI();
 
     if (currentStep !== 5 && retroPanel) {
       retroPanel.classList.remove('hidden');
     }
 
-    if (error.message && error.message.includes('503')) {
-      showToast('앗! 서버가 잠시 혼잡해요. (10초 뒤 버튼을 다시 눌러주세요)');
-    } else {
-      showToast('진화 중 오류가 발생했어요.');
-    }
+    const errMsg = error.message === 'TIMEOUT' ? '서버 응답 시간이 초과되었습니다.' : '진화 처리 중 오류가 발생했습니다.';
+    showToast(errMsg);
   } finally {
-    if (saveBtn) saveBtn.disabled = false;
-    if (getAiCooldownRemainingMs() > 0) syncAICooldownUI();
+    if (saveBtn && getAiCooldownRemainingMs() <= 0) saveBtn.disabled = false;
   }
 }
 
@@ -661,10 +748,18 @@ async function initApp() {
   bindClick('google-login-btn', handleGoogleLogin);
   bindClick('logout-btn', handleLogout);
   bindClick('send-btn', handleSendMessage);
-  bindClick('close-chat', () => {
-    const p = getEl('chat-panel');
-    if (p) p.classList.add('hidden');
-  });
+  
+  const chatInput = getEl('chat-input');
+  if (chatInput) {
+    chatInput.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter' && e.shiftKey) {
+        e.preventDefault();
+        handleSendMessage();
+      }
+    });
+  }
+
+  bindClick('back-to-garden-btn', () => switchView('garden'));
   bindClick('save-diary-btn', saveDiaryAndEvolve);
   bindClick('close-retrospective', () => {
     const p = getEl('retrospective-panel');

@@ -48,50 +48,73 @@
     <!-- 최초 접속 시 노출되는 환영 문구 -->
     <div id="welcome-message" class="welcome-text">반가워요!...</div>
 
-    <!-- 상단/하단: 주요 메뉴 버튼 -->
-    <div id="top-controls" class="hidden">
-        <button id="archive-btn" class="ui-button compact-control-btn">앨범 보기</button>
-        <button id="guide-btn" class="ui-button compact-control-btn">가이드</button>
-        <button id="logout-btn" class="ui-button compact-control-btn logout-control-btn">로그아웃</button>
-    </div>
+    <!-- 정원 뷰 (정원 그리드 및 상단 컨트롤) -->
+    <div id="garden-view" class="hidden">
+        <!-- 상단/하단: 주요 메뉴 버튼 -->
+        <div id="top-controls">
+            <button id="archive-btn" class="ui-button compact-control-btn">앨범 보기</button>
+            <button id="guide-btn" class="ui-button compact-control-btn">가이드</button>
+            <button id="logout-btn" class="ui-button compact-control-btn logout-control-btn">로그아웃</button>
+        </div>
 
-    <!-- 3x3 아이소메트릭 픽셀 아트 정원 공간 -->
-    <div class="garden-container">
-        <div class="isometric-grid" id="grid-container">
-            <!-- 9개의 빈 셀 (data-index로 위치 식별) -->
-            <div class="cell empty" data-index="0"></div>
-            <div class="cell empty" data-index="1"></div>
-            <div class="cell empty" data-index="2"></div>
-            <div class="cell empty" data-index="3"></div>
-            <div class="cell empty" data-index="4"></div>
-            <div class="cell empty" data-index="5"></div>
-            <div class="cell empty" data-index="6"></div>
-            <div class="cell empty" data-index="7"></div>
-            <div class="cell empty" data-index="8"></div>
+        <!-- 3x3 아이소메트릭 픽셀 아트 정원 공간 -->
+        <div class="garden-container">
+            <div class="isometric-grid" id="grid-container">
+                <!-- 9개의 빈 셀 (data-index로 위치 식별) -->
+                <div class="cell empty" data-index="0"></div>
+                <div class="cell empty" data-index="1"></div>
+                <div class="cell empty" data-index="2"></div>
+                <div class="cell empty" data-index="3"></div>
+                <div class="cell empty" data-index="4"></div>
+                <div class="cell empty" data-index="5"></div>
+                <div class="cell empty" data-index="6"></div>
+                <div class="cell empty" data-index="7"></div>
+                <div class="cell empty" data-index="8"></div>
+            </div>
         </div>
     </div>
 
-    <!-- 빈 셀 클릭 시 나타날 씨앗 선택 팝업 -->
-    <div id="seed-popup" class="hidden">
-        <!-- app.js가 이 안의 내용을 채웁니다 -->
-    </div>
+    <!-- 비주얼 대화 뷰 (전체 화면 3분할 레이아웃) -->
+    <div id="chat-view" class="hidden">
+        <div class="chat-container-wide">
+            <!-- 좌측 컬럼: 캐릭터 비주얼 및 현재 대화 -->
+            <div class="chat-left-column">
+                <div class="character-display-area">
+                    <div id="chat-koongya-visual-frame">
+                        <img id="chat-koongya-img" src="" alt="쿵야">
+                    </div>
+                    <div class="character-status">
+                        <span id="chat-koongya-name-display">쿵야</span> (Step <span id="chat-koongya-step">1</span>)
+                    </div>
+                </div>
+                
+                <!-- 쿵야의 현재 답변 (스트리밍 영역) -->
+                <div class="active-dialogue-area">
+                    <div class="dialogue-label">쿵야의 생각</div>
+                    <div id="active-message-text" class="streaming-text">쿵야에게 말을 걸어보세요!</div>
+                    <div id="chat-loading-dots" class="hidden">...</div>
+                </div>
+            </div>
 
-    <!-- 1. 캐릭터 전용 대화 패널 -->
-    <div id="chat-panel" class="hidden">
-        <div class="chat-header">
-            <span id="chat-koongya-name">쿵야</span>와의 대화
-            <button id="close-chat">X</button>
-        </div>
-        <div class="chat-log" id="chat-log">
-            <!-- 말풍선 대화가 쌓이는 곳 -->
-        </div>
-        <!-- 응답 대기 중 '...' 애니메이션 영역 -->
-        <div id="chat-loading" class="hidden">쿵야가 생각 중이에요...</div>
-        <div class="chat-input-area">
-            <input type="text" id="chat-input" placeholder="쿵야에게 말 걸기...">
-            <button id="send-btn">전송</button>
-            <!-- 5-3-1 로직에 따라 대화 횟수 충족 시 나타날 회고 버튼 -->
-            <button id="retrospective-btn" class="hidden" style="background-color: #ff9800;">회고하기</button>
+            <!-- 우측 컬럼: 전체 대화 기록 및 입력창 -->
+            <div class="chat-right-column">
+                <div class="chat-history-header">
+                    <span>대화 기록</span>
+                    <div class="chat-view-buttons">
+                        <button id="retrospective-btn" class="ui-button hidden">회고하기</button>
+                        <button id="back-to-garden-btn" class="ui-button">정원으로</button>
+                    </div>
+                </div>
+                
+                <div class="chat-history-log" id="chat-log">
+                    <!-- 전체 대화 기록이 쌓이는 곳 -->
+                </div>
+
+                <div class="chat-input-section">
+                    <textarea id="chat-input" placeholder="이곳에 생각을 적어보세요... (Shift + Enter로 전송 가능)"></textarea>
+                    <button id="send-btn">전송</button>
+                </div>
+            </div>
         </div>
     </div>
 

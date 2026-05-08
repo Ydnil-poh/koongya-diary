@@ -3,7 +3,7 @@ import { GoogleGenAI } from 'https://esm.run/@google/genai';
 
 const AI_COOLDOWN_UNTIL_KEY = 'koongya_ai_cooldown_until';
 const DEFAULT_MODEL_CANDIDATES = ['gemini-3-flash-preview', 'gemini-3.1-flash-lite-preview', 'gemini-2.5-flash'];
-const REQUEST_TIMEOUT_MS = 25000; // 25초 타임아웃
+const REQUEST_TIMEOUT_MS = 25000;
 
 let CONFIG = {
   SUPABASE_URL: '',
@@ -15,68 +15,61 @@ async function initializeConfig() {
   const cachedConfig = localStorage.getItem('koongya_config');
   if (cachedConfig) {
     try {
-      CONFIG = JSON.parse(cachedConfig);
-      console.log('[System] 로컬 캐시에서 설정을 즉시 로드했습니다.');
-
-      fetch('/api/config')
-        .then((res) => res.json())
-        .then((serverConfig) => {
-          if (serverConfig.SUPABASE_URL) {
-            localStorage.setItem('koongya_config', JSON.stringify(serverConfig));
-          }
-        })
-        .catch(() => {});
-      return;
-    } catch (e) {
-      console.warn('[System] 캐시된 설정을 파싱할 수 없습니다.', e);
-    }
-  }
-
-  try {
-    const response = await fetch('/api/config');
-    if (response.ok) {
-      const serverConfig = await response.json();
-      if (serverConfig.SUPABASE_URL) {
-        CONFIG = serverConfig;
-        localStorage.setItem('koongya_config', JSON.stringify(serverConfig));
-        console.log('[System] 서버 보안 설정을 로드했습니다.');
-        return;
+      const parsed = JSON.parse(cachedConfig);
+      // 필수 값인 API 키가 있는지 확인
+      if (parsed.GEMINI_API_KEY && parsed.GEMINI_API_KEY.trim() !== '') {
+        CONFIG = parsed;
+        console.log('[System] 캐시된 설정을 로드했습니다.');
+      } else {
+        console.warn('[System] 캐시된 설정에 API 키가 없어 무시합니다.');
+        localStorage.removeItem('koongya_config');
       }
+    } catch (e) {
+      localStorage.removeItem('koongya_config');
     }
-  } catch (e) {
-    console.log('[System] 서버 API 응답 없음. 로컬 모드로 진행합니다.');
   }
 
-  try {
-    const module = await import('../config.js');
-    if (module.CONFIG) {
-      CONFIG = module.CONFIG;
-      localStorage.setItem('koongya_config', JSON.stringify(CONFIG));
+  // 캐시에 없거나 부실할 경우 파일/서버에서 다시 로드
+  if (!CONFIG.GEMINI_API_KEY) {
+    try {
+      const module = await import('../config.js');
+      if (module.CONFIG && module.CONFIG.GEMINI_API_KEY) {
+        CONFIG = module.CONFIG;
+        localStorage.setItem('koongya_config', JSON.stringify(CONFIG));
+        console.log('[System] config.js 파일에서 설정을 새로 로드했습니다.');
+      }
+    } catch (e) {
+      console.error('[System] 설정을 로드하는 데 실패했습니다.');
     }
-    console.log('[System] 로컬 설정 파일을 로드했습니다.');
-  } catch (e) {
-    console.error('[System] 설정을 불러올 수 없습니다. API 키를 확인해주세요.');
   }
 }
 
-// 상단에서 설정을 기다립니다.
 await initializeConfig();
 
 export const supabase = createClient(CONFIG.SUPABASE_URL, CONFIG.SUPABASE_ANON_KEY, {
   auth: { persistSession: true, autoRefreshToken: true, detectSessionInUrl: true, storageKey: 'koongya-diary-auth' }
 });
 
-// 지연 초기화를 위한 변수 및 함수
 let genAIInstance = null;
 
 function getGenAI() {
   if (genAIInstance) return genAIInstance;
-  if (!CONFIG.GEMINI_API_KEY) {
-    console.error('[AI] GEMINI_API_KEY가 없습니다. config.js를 확인하세요.');
+  
+  const apiKey = CONFIG.GEMINI_API_KEY;
+  if (!apiKey || apiKey.trim() === '') {
+    console.error('[AI] API Key가 설정되지 않았습니다. 현재 설정 상태:', CONFIG);
     throw new Error('API_KEY_MISSING');
   }
-  genAIInstance = new GoogleGenAI(CONFIG.GEMINI_API_KEY);
-  return genAIInstance;
+
+  try {
+    // 2026년 기준 SDK는 문자열 혹은 객체를 모두 지원할 수 있으나 가장 표준적인 방식으로 시도
+    genAIInstance = new GoogleGenAI(apiKey);
+    return genAIInstance;
+  } catch (e) {
+    console.warn('[AI] 문자열 초기화 실패, 객체 방식으로 재시도합니다.');
+    genAIInstance = new GoogleGenAI({ apiKey: apiKey });
+    return genAIInstance;
+  }
 }
 
 let cachedModelNames = null;

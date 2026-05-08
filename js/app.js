@@ -511,17 +511,17 @@ async function generateAIInsight() {
     insightCache = { koongyaId: currentDbId, content: insightText };
     
     // 통합된 UI: 좌측 하단 스트리밍 영역에 인사이트 출력
-    getEl('dialogue-label').innerText = 'AI 인사이트';
+    getEl('dialogue-label').innerText = '쿵야의 정리';
     getEl('active-message-text').innerHTML = `<div class="insight-box">${insightText.replace(/\n/g, '<br>')}</div>`;
 
   } catch (error) {
     console.error('[Insight] 에러:', error);
     if (parseCooldownSeconds(error) > 0) {
       syncAICooldownUI();
-      getEl('active-message-text').innerHTML = '<p class="status-text">AI 요청 한도 초과. 잠시 후 다시 시도해 주세요.</p>';
+      getEl('active-message-text').innerHTML = '<p class="status-text">쿵야가 조금 지쳤나봐요. 잠시 후 다시 부탁해 주세요.</p>';
     } else {
-      getEl('active-message-text').innerHTML = '<p class="status-text">분석에 실패했어요. 다시 시도해 주세요.</p>';
-      showToast('분석 실패: ' + (error.message || '알 수 없는 오류'));
+      getEl('active-message-text').innerHTML = '<p class="status-text">정리에 실패했어요. 다시 한번 말씀해 주세요.</p>';
+      showToast('정리 실패: ' + (error.message || '알 수 없는 오류'));
     }
   } finally {
     insightGenerationInFlight = false;
@@ -546,8 +546,15 @@ function toggleChatMode(mode) {
   getEl('chat-input-section').classList.toggle('hidden', isRetro);
   getEl('chat-retro-section').classList.toggle('hidden', !isRetro);
   
-  // 라벨 및 텍스트 리셋 (대화 모드로 돌아갈 때)
-  if (!isRetro) {
+  // 상단 회고 버튼 숨기기
+  const retroBtn = getEl('retrospective-btn');
+  if (retroBtn) retroBtn.classList.toggle('hidden', isRetro);
+  
+  // 라벨 및 텍스트 리셋/설정
+  if (isRetro) {
+    getEl('dialogue-label').innerText = '쿵야의 정리';
+    getEl('active-message-text').innerHTML = '<p class="status-text">쿵야가 오늘 나눈 대화를 정리하고 있어요...</p>';
+  } else {
     getEl('dialogue-label').innerText = '쿵야의 생각';
     getEl('active-message-text').innerText = '';
   }
@@ -567,7 +574,6 @@ async function openRetrospective() {
 }
 
 async function processGraduation(diaryContent) {
-  const retroPanel = getEl('retrospective-panel');
   showToast('🎓 쿵야가 마지막 인사를 준비하고 있어요. 잠시만 기다려주세요!');
 
   try {
@@ -622,7 +628,6 @@ async function saveDiaryAndEvolve() {
   const saveBtn = getEl('save-diary-btn');
   const diaryInput = getEl('diary-input');
   const diaryContent = clipText(diaryInput?.value || '', 2000);
-  const retroPanel = getEl('retrospective-panel');
 
   if (!diaryContent) {
     showToast('일기를 먼저 작성해 주세요!');
@@ -639,7 +644,6 @@ async function saveDiaryAndEvolve() {
       console.log('[Evolve] 졸업 프로세스 시작');
       await processGraduation(diaryContent);
     } else {
-      if (retroPanel) retroPanel.classList.add('hidden');
       showToast('일기 저장 완료! 쿵야가 일기를 읽으며 진화 중입니다...');
 
       const nextStep = currentStep + 1;
@@ -659,19 +663,22 @@ async function saveDiaryAndEvolve() {
       await supabase.from('active_koongyas').update({ current_step: nextStep, diary_content: diaryContent }).eq('id', targetDbId);
       await saveChatLog(targetDbId, 'ai', aiGreeting);
       
+      // UI 즉시 업데이트
+      currentStep = nextStep;
+      const newImgPath = getKoongyaImagePath(currentKoongyaId, currentStep);
+      getEl('chat-koongya-img').src = newImgPath;
+      getEl('chat-koongya-step').innerText = currentStep;
+      
       insightCache = { koongyaId: null, content: null };
       showToast(`🎉 ${targetKoongyaName} 쿵야가 ${nextStep}단계로 진화했습니다!`);
 
-      await loadActiveKoongyas();
+      // 회고 모드 종료 및 대화창 갱신
+      toggleChatMode('chat');
+      await Promise.all([loadActiveKoongyas(), loadChatHistory(targetDbId)]);
     }
   } catch (error) {
     console.error('[Evolve] 에러 발생:', error);
     if (parseCooldownSeconds(error) > 0) syncAICooldownUI();
-
-    if (currentStep !== 5 && retroPanel) {
-      retroPanel.classList.remove('hidden');
-    }
-
     const errMsg = error.message === 'TIMEOUT' ? '서버 응답 시간이 초과되었습니다.' : '진화 처리 중 오류가 발생했습니다.';
     showToast(errMsg);
   } finally {

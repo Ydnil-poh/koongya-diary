@@ -59,13 +59,25 @@ async function initializeConfig() {
   }
 }
 
+// 상단에서 설정을 기다립니다.
 await initializeConfig();
 
 export const supabase = createClient(CONFIG.SUPABASE_URL, CONFIG.SUPABASE_ANON_KEY, {
   auth: { persistSession: true, autoRefreshToken: true, detectSessionInUrl: true, storageKey: 'koongya-diary-auth' }
 });
 
-const genAI = new GoogleGenAI(CONFIG.GEMINI_API_KEY);
+// 지연 초기화를 위한 변수 및 함수
+let genAIInstance = null;
+
+function getGenAI() {
+  if (genAIInstance) return genAIInstance;
+  if (!CONFIG.GEMINI_API_KEY) {
+    console.error('[AI] GEMINI_API_KEY가 없습니다. config.js를 확인하세요.');
+    throw new Error('API_KEY_MISSING');
+  }
+  genAIInstance = new GoogleGenAI(CONFIG.GEMINI_API_KEY);
+  return genAIInstance;
+}
 
 let cachedModelNames = null;
 let modelCacheAt = 0;
@@ -92,7 +104,8 @@ export function getAiCooldownRemainingMs() {
 async function getAvailableModelNames() {
   if (cachedModelNames && Date.now() - modelCacheAt < MODEL_CACHE_TTL_MS) return cachedModelNames;
   try {
-    const models = await genAI.models.list();
+    const ai = getGenAI();
+    const models = await ai.models.list();
     const names = [];
     for await (const model of models) {
       if (model.supportedActions && model.supportedActions.includes('generateContent')) {
@@ -121,7 +134,8 @@ export async function generateContentWithFallback(prompt) {
   for (const modelName of modelNames) {
     console.log(`[AI] ${modelName} 모델로 요청 중...`);
     try {
-      const model = genAI.getGenerativeModel({ model: modelName });
+      const ai = getGenAI();
+      const model = ai.getGenerativeModel({ model: modelName });
       const result = await model.generateContent(prompt);
       return { response: { text: () => result.response.text() || '' } };
     } catch (error) {
@@ -150,7 +164,8 @@ export async function* generateContentStreamWithFallback(prompt) {
   for (const modelName of modelNames) {
     console.log(`[AI-Stream] ${modelName} 모델로 스트리밍 요청 중...`);
     try {
-      const model = genAI.getGenerativeModel({ model: modelName });
+      const ai = getGenAI();
+      const model = ai.getGenerativeModel({ model: modelName });
       const result = await model.generateContentStream(prompt);
       
       for await (const chunk of result.stream) {

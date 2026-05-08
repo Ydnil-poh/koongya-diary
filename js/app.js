@@ -509,15 +509,18 @@ async function generateAIInsight() {
     console.log('[Insight] AI 분석 완료');
     
     insightCache = { koongyaId: currentDbId, content: insightText };
-    aiKeywordsContainer.innerHTML = `<div class="insight-box">${insightText.replace(/\n/g, '<br>')}</div>`;
+    
+    // 통합된 UI: 좌측 하단 스트리밍 영역에 인사이트 출력
+    getEl('dialogue-label').innerText = 'AI 인사이트';
+    getEl('active-message-text').innerHTML = `<div class="insight-box">${insightText.replace(/\n/g, '<br>')}</div>`;
 
   } catch (error) {
     console.error('[Insight] 에러:', error);
     if (parseCooldownSeconds(error) > 0) {
       syncAICooldownUI();
-      aiKeywordsContainer.innerHTML = '<p class="status-text">AI 요청 한도 초과. 잠시 후 다시 시도해 주세요.</p>';
+      getEl('active-message-text').innerHTML = '<p class="status-text">AI 요청 한도 초과. 잠시 후 다시 시도해 주세요.</p>';
     } else {
-      aiKeywordsContainer.innerHTML = '<p class="status-text">분석에 실패했어요. 다시 시도해 주세요.</p>';
+      getEl('active-message-text').innerHTML = '<p class="status-text">분석에 실패했어요. 다시 시도해 주세요.</p>';
       showToast('분석 실패: ' + (error.message || '알 수 없는 오류'));
     }
   } finally {
@@ -528,9 +531,30 @@ async function generateAIInsight() {
   }
 }
 
+function toggleChatMode(mode) {
+  const isRetro = mode === 'retro';
+  
+  // 제목 변경
+  const title = getEl('chat-right-title');
+  if (title) title.innerText = isRetro ? '회고 및 일기 작성' : '대화 기록';
+  
+  // 영역 전환
+  getEl('chat-log').classList.toggle('hidden', isRetro);
+  getEl('chat-diary-area').classList.toggle('hidden', !isRetro);
+  
+  // 하단 섹션 전환
+  getEl('chat-input-section').classList.toggle('hidden', isRetro);
+  getEl('chat-retro-section').classList.toggle('hidden', !isRetro);
+  
+  // 라벨 및 텍스트 리셋 (대화 모드로 돌아갈 때)
+  if (!isRetro) {
+    getEl('dialogue-label').innerText = '쿵야의 생각';
+    getEl('active-message-text').innerText = '';
+  }
+}
+
 async function openRetrospective() {
-  getEl('chat-panel').classList.add('hidden');
-  getEl('retrospective-panel').classList.remove('hidden');
+  toggleChatMode('retro');
   generateAIInsight();
   const diaryInput = getEl('diary-input');
   diaryInput.value = '불러오는 중...';
@@ -567,7 +591,8 @@ async function processGraduation(diaryContent) {
 
     await supabase.from('active_koongyas').delete().eq('id', currentDbId);
 
-    if (retroPanel) retroPanel.classList.add('hidden');
+    // 회고 모드 종료
+    toggleChatMode('chat');
 
     getEl('grad-koongya-img').src = imagePath;
     getEl('grad-core-question').innerText = `"${coreQuestion}"`;
@@ -714,8 +739,7 @@ async function initApp() {
   bindClick('back-to-garden-btn', () => switchView('garden'));
   bindClick('save-diary-btn', saveDiaryAndEvolve);
   bindClick('close-retrospective', () => {
-    const p = getEl('retrospective-panel');
-    if (p) p.classList.add('hidden');
+    toggleChatMode('chat');
   });
   bindClick('regenerate-insight-btn', () => {
     insightCache = { koongyaId: null, content: null };

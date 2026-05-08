@@ -84,7 +84,7 @@
                 
                 <!-- 쿵야의 현재 답변 (스트리밍 영역) -->
                 <div class="active-dialogue-area">
-                    <div class="dialogue-label">쿵야의 생각</div>
+                    <div id="dialogue-label" class="dialogue-label">쿵야의 생각</div>
                     <div id="active-message-text" class="streaming-text"></div>
                     <div id="chat-loading-dots" class="hidden">...</div>
                 </div>
@@ -93,48 +93,38 @@
             <!-- 우측 컬럼: 전체 대화 기록 및 입력창 -->
             <div class="chat-right-column">
                 <div class="chat-history-header">
-                    <span>대화 기록</span>
+                    <span id="chat-right-title">대화 기록</span>
                     <div class="chat-view-buttons">
                         <button id="retrospective-btn" class="ui-button hidden">회고하기</button>
                         <button id="back-to-garden-btn" class="ui-button">정원으로</button>
                     </div>
                 </div>
                 
+                <!-- 대화 로그 모드 -->
                 <div class="chat-history-log" id="chat-log">
                     <!-- 전체 대화 기록이 쌓이는 곳 -->
                 </div>
 
-                <div class="chat-input-section">
+                <!-- 회고(일기) 모드 -->
+                <div id="chat-diary-area" class="hidden">
+                    <textarea id="diary-input" placeholder="오늘 쿵야와 나눈 대화를 바탕으로 당신의 생각을 적어보세요..."></textarea>
+                </div>
+
+                <!-- 대화 모드 하단 -->
+                <div id="chat-input-section" class="chat-input-section">
                     <textarea id="chat-input" placeholder="이곳에 생각을 적어보세요... (Shift + Enter로 전송 가능)"></textarea>
                     <button id="send-btn">전송</button>
                 </div>
-            </div>
-        </div>
-    </div>
 
-    <!-- 2. 2분할 회고 화면 (일기장) -->
-    <div id="retrospective-panel" class="hidden">
-        <div class="retro-container">
-            <!-- 좌측: AI Insight -->
-            <div class="retro-left">
-                <h3>
-                    AI Insight
-                    <button id="regenerate-insight-btn" class="regenerate-btn">새로고침 🔄</button>
-                </h3>
-                <div id="ai-keywords">
-                    <!-- AI가 분석한 핵심 키워드와 가이드 질문이 나옵니다 -->
+                <!-- 회고 모드 하단 -->
+                <div id="chat-retro-section" class="chat-retro-section hidden">
+                    <button id="regenerate-insight-btn" class="ui-button">AI 분석 다시하기 🔄</button>
+                    <div class="retro-action-btns">
+                        <button id="close-retrospective" class="ui-button">대화로 돌아가기</button>
+                        <button id="save-diary-btn" class="ui-button primary-btn">일기 저장하고 진화하기</button>
+                    </div>
                 </div>
             </div>
-            <!-- 우측: My Diary -->
-            <div class="retro-right">
-                <h3>Diary</h3>
-                <textarea id="diary-input" placeholder="오늘 쿵야와 나눈 대화를 바탕으로 당신의 생각을 적어보세요..."></textarea>
-            </div>
-        </div>
-
-        <div class="retro-footer">
-            <button id="close-retrospective" class="retro-button retro-button-close">다음에 적기</button>
-            <button id="save-diary-btn" class="retro-button retro-button-save">일기 저장하고 진화하기</button>
         </div>
     </div>
 

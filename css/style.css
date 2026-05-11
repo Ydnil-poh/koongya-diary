@@ -232,6 +232,7 @@ body {
     z-index: 2;
     transform: translate(-50%, -100%) rotateZ(45deg) rotateX(-90deg);
     animation: breathe 2s ease-in-out infinite;
+    pointer-events: none; /* 쿵야 이미지가 뒤쪽 셀의 클릭을 방해하지 않도록 설정 */
 }
 
 @keyframes breathe {
@@ -252,7 +253,7 @@ body {
     border: 1px solid #ddd;
     padding: 25px;
     box-shadow: 0 15px 35px rgba(0, 0, 0, 0.15);
-    z-index: 10;
+    z-index: 1000;
     text-align: center;
     border-radius: 20px;
 }

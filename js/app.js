@@ -286,11 +286,23 @@ async function loadActiveKoongyas() {
 function openSeedPopup() {
   const popup = getEl('seed-popup');
   if (!popup) return;
+  
   let popupHtml = '<h3>어떤 쿵야를 심을까요?</h3><div class="seed-list">';
+  let hasUnlocked = false;
+
   KOONGYA_ORDER.forEach((koongya) => {
-    if (unlockedKoongyas.includes(koongya.id)) popupHtml += `<div class="seed-item unlocked" onclick="plantSeed('${koongya.id}')">🌱 ${koongya.name} 쿵야</div>`;
-    else popupHtml += '<div class="seed-item locked" title="다른 쿵야를 졸업시키면 해금됩니다.">🔒 ???</div>';
+    if (unlockedKoongyas.includes(koongya.id)) {
+      popupHtml += `<div class="seed-item unlocked" onclick="plantSeed('${koongya.id}')">🌱 ${koongya.name} 쿵야</div>`;
+      hasUnlocked = true;
+    } else {
+      popupHtml += `<div class="seed-item locked" title="다른 쿵야를 졸업시키면 해금됩니다.">🔒 ???</div>`;
+    }
   });
+
+  if (!hasUnlocked) {
+    popupHtml += '<p style="font-size:0.9rem; color:#666;">심을 수 있는 쿵야가 아직 없어요.<br>(Onion 쿵야가 기본 해금되어야 합니다)</p>';
+  }
+
   popupHtml += '</div><button id="close-popup" class="ui-button" style="margin-top: 15px;">닫기</button>';
   popup.innerHTML = popupHtml;
   popup.classList.remove('hidden');

@@ -121,7 +121,7 @@ async function getAvailableModelNames() {
   }
 }
 
-export async function generateContentWithFallback(prompt) {
+export async function generateContentWithFallback(prompt, systemInstruction = '') {
   const cooldownMs = getAiCooldownRemainingMs();
   if (cooldownMs > 0) {
     throw new Error(`AI_COOLDOWN:${Math.ceil(cooldownMs / 1000)}`);
@@ -136,7 +136,12 @@ export async function generateContentWithFallback(prompt) {
       // 최신 SDK 호출 방식
       const result = await ai.models.generateContent({
         model: modelName,
-        contents: prompt
+        systemInstruction: systemInstruction || undefined,
+        contents: prompt,
+        generationConfig: {
+          temperature: 0.8,
+          maxOutputTokens: 800
+        }
       });
       
       return { response: { text: () => result.text || '' } }; // app.js 호환성 유지
@@ -154,7 +159,7 @@ export async function generateContentWithFallback(prompt) {
   throw lastError || new Error('모든 AI 모델 호출에 실패했습니다.');
 }
 
-export async function* generateContentStreamWithFallback(prompt) {
+export async function* generateContentStreamWithFallback(prompt, systemInstruction = '') {
   const cooldownMs = getAiCooldownRemainingMs();
   if (cooldownMs > 0) {
     throw new Error(`AI_COOLDOWN:${Math.ceil(cooldownMs / 1000)}`);
@@ -170,7 +175,12 @@ export async function* generateContentStreamWithFallback(prompt) {
       // 최신 SDK 스트리밍 호출 방식
       const responseStream = await ai.models.generateContentStream({
         model: modelName,
-        contents: prompt
+        systemInstruction: systemInstruction || undefined,
+        contents: prompt,
+        generationConfig: {
+          temperature: 0.8,
+          maxOutputTokens: 800
+        }
       });
       
       for await (const chunk of responseStream) {

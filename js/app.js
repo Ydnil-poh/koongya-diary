@@ -35,23 +35,22 @@ function clipText(value, maxChars) {
   return value.length > maxChars ? `${value.slice(0, maxChars)}…` : value;
 }
 
-function buildCoachingGuide() {
-  return `너는 사용자의 짧은 생각을 확장해 글감으로 발전시키는 코치야.
-- 핵심 1가지만 짚어 확장해.
-- 답변 끝에 구체 질문 1개를 포함해.
-- 짧고 밀도 있게 답해.
-- 마크다운 기호(**, #)는 쓰지 말고 순수 텍스트로 작성해.`;
+function buildChatGuide() {
+  const currentView = getEl('chat-koongya-name-display')?.innerText || '쿵야';
+  return `[역할] 사용자의 질문을 분석하고 전문 지식(철학, 과학, 트렌드 등)을 결합해 해설하는 '인텔리전스 가이드'.
+[페르소나] 너는 '${currentView}' 쿵야야. 지적인 통찰을 제공하되, 반드시 '${currentView}' 쿵야 특유의 말투로 말해.
+[규칙]
+1. 단순 공감이 아니라, 사용자의 말에 담긴 이면의 의미나 전문 지식을 1개 연결해 입체적으로 해설해.
+2. 토큰을 아껴야 하므로 무조건 2~3문장 이내로 초압축해서 짧게 대답해. 불필요한 미사여구는 빼.
+3. 마지막엔 항상 생각을 더 깊게 파고드는 날카로운 확장 질문 1개를 던져. 마크다운 기호(**, #) 금지.`;
 }
 
 function buildInsightGuide() {
-  return `너는 회고 코치야.
-[역할]
-- 캐릭터 역할극/페르소나 말투는 사용하지 말고, 대화 전체를 하나의 글감으로 묶는 데 집중해.
-- 핵심 감정 1개 + 핵심 주제 1개를 뽑아 간결하게 연결해.
-[출력 규칙]
-- 2~3문장 코멘트와 마지막 질문 1개만 작성해.
-- 질문은 사용자가 바로 일기 문장으로 이어 쓸 수 있게 구체적으로 만들어.
-- 마크다운 기호(**, #)는 쓰지 말고 순수 텍스트로 작성해.`;
+  return `[역할] 대화 기록을 분석하여 사용자의 핵심 가치관이나 무의식적 패턴을 찾아내는 '심층 해설사'.
+[규칙]
+1. 단순 요약을 금지함. 대화 이면에 깔린 심리적 상태나 행동 패턴을 전문 용어를 사용해 1개만 짚어낼 것.
+2. 2~3문장으로 짧게 핵심만 출력하고, 마지막에 "자, 이제 이 생각들을 일기로 정리해 볼까?"라고 제안할 것.
+3. 마크다운 기호(**, #) 금지.`;
 }
 
 function buildDialogueSnippet(logs, maxChars = AI_LIMITS.MAX_MESSAGE_CHARS) {
@@ -439,8 +438,8 @@ async function handleSendMessage() {
       diaryContext = `[이전 일기 요약]\n"${clipText(koongyaDataDb.diary_content, AI_LIMITS.MAX_DIARY_CHARS)}"\n\n`;
     }
 
-    const systemPrompt = buildCoachingGuide();
-    const stream = generateContentStreamWithFallback(`${systemPrompt}\n\n${diaryContext}[현재 대화]\n사용자: "${message}"\n코치:`);
+    const systemPrompt = buildChatGuide();
+    const stream = generateContentStreamWithFallback(`${diaryContext}[현재 대화]\n사용자: "${message}"\n쿵야:`, systemPrompt);
     
     if (loadingDots) loadingDots.classList.add('hidden');
     
@@ -514,7 +513,8 @@ async function generateAIInsight() {
     
     console.log('[Insight] AI 분석 요청 시작');
     const result = await generateContentWithFallback(
-      `${systemPrompt}\n\n[대화 기록]\n${chatContext}\n\n[요청]\n대화를 요약하고 질문을 던져줘.`
+      `[대화 기록]\n${chatContext}\n\n[요청]\n대화를 분석하고 입체적인 해설을 제공해 줘.`,
+      systemPrompt
     );
     
     const insightText = result.response.text();
@@ -598,9 +598,10 @@ async function processGraduation(diaryContent) {
     const chatContext = buildDialogueSnippet((logs || []).reverse());
     const safeDiary = clipText(diaryContent, AI_LIMITS.MAX_DIARY_CHARS);
 
-    const prompt = `${buildCoachingGuide()}\n사용자가 너와 나눈 최근 대화와 마지막 일기를 바탕으로, 다음 글을 더 길고 깊게 쓸 수 있게 돕는 '핵심 확장 질문 1개'를 30자 이내로 작성해.\n\n[최근 대화내용]\n"${chatContext}"\n\n[일기]\n"${safeDiary}"`;
-
-    const result = await generateContentWithFallback(prompt);
+    const result = await generateContentWithFallback(
+      `사용자가 너와 나눈 최근 대화와 마지막 일기를 바탕으로, 다음 글을 더 길고 깊게 쓸 수 있게 돕는 '핵심 확장 질문 1개'를 30자 이내로 작성해.\n\n[최근 대화내용]\n"${chatContext}"\n\n[일기]\n"${safeDiary}"`,
+      buildChatGuide()
+    );
     const coreQuestion = result.response.text().replace(/"/g, '').trim();
     const imagePath = getKoongyaImagePath(currentKoongyaId, 5);
 
@@ -659,16 +660,11 @@ async function saveDiaryAndEvolve() {
       showToast('일기 저장 완료! 쿵야가 일기를 읽으며 진화 중입니다...');
 
       const nextStep = currentStep + 1;
-      const prompt = `${buildCoachingGuide()}
-사용자가 방금 너와의 대화를 마친 후 아래와 같은 [최신 회고록]을 남겼어.
-
-[최신 회고록]
-"${clipText(diaryContent, AI_LIMITS.MAX_DIARY_CHARS)}"
-
-이 회고록의 핵심을 1~2문장으로 코멘트하고, 다음 회고를 더 길게 쓸 수 있도록 생각 확장 질문 1개를 함께 제시해 줘.`;
-
       console.log('[Evolve] AI 진화 메시지 생성 중...');
-      const result = await generateContentWithFallback(prompt);
+      const result = await generateContentWithFallback(
+        `사용자가 방금 너와의 대화를 마친 후 아래와 같은 [최신 회고록]을 남겼어. 이 회고록의 핵심을 1~2문장으로 코멘트하고, 생각 확장 질문 1개를 함께 제시해 줘.\n\n[최신 회고록]\n"${clipText(diaryContent, AI_LIMITS.MAX_DIARY_CHARS)}"`,
+        buildChatGuide()
+      );
       const aiGreeting = result.response.text();
       console.log('[Evolve] AI 진화 메시지 완료');
 

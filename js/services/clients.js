@@ -139,7 +139,7 @@ export async function generateContentWithFallback(prompt, systemInstruction = ''
         systemInstruction: systemInstruction || undefined,
         contents: prompt,
         generationConfig: {
-          temperature: 0.8,
+          temperature: 0.7,
           maxOutputTokens: 800
         }
       });

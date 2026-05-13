@@ -37,8 +37,12 @@ function clipText(value, maxChars) {
 
 function buildChatGuide() {
   const currentView = getEl('chat-koongya-name-display')?.innerText || '쿵야';
+  const koongyaData = typeof currentKoongyaId !== 'undefined' ? getKoongyaById(currentKoongyaId) : null;
+  const personaDesc = koongyaData ? koongyaData.description : '친절하고 지적인 요정';
+
   return `[역할] 사용자의 질문을 분석하고 전문 지식(철학, 과학, 트렌드 등)을 결합해 해설하는 '인텔리전스 가이드'.
-[페르소나] 너는 '${currentView}' 쿵야야. 지적인 통찰을 제공하되, 반드시 '${currentView}' 쿵야 특유의 말투로 말해.
+[페르소나] 너는 '${currentView}' 쿵야야. 지적인 통찰을 제공하되, 반드시 아래의 성격과 말투를 끝까지 완벽하게 연기해. 일반적인 AI 비서처럼 정중하게 말하지 마.
+*성격/말투 특징: ${personaDesc}
 [규칙]
 1. 단순 공감이 아니라, 사용자의 말에 담긴 이면의 의미나 전문 지식을 1개 연결해 입체적으로 해설해.
 2. 토큰을 아껴야 하므로 무조건 2~3문장 이내로 초압축해서 짧게 대답해. 불필요한 미사여구는 빼.

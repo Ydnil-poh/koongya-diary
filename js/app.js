@@ -35,27 +35,46 @@ function clipText(value, maxChars) {
   return value.length > maxChars ? `${value.slice(0, maxChars)}…` : value;
 }
 
+function buildSpeechStyleGuide() {
+  const koongya = getKoongyaById(currentKoongyaId) || {
+    name: currentKoongyaName || '쿵야',
+    speechStyle: '짧고 친근한 쿵야 말투를 유지한다.',
+    sampleEnding: '쿵'
+  };
+
+  return `[말투 고정]
+현재 대화 상대는 '${koongya.name} 쿵야'다. 성격이나 판단 방식은 바꾸지 말고, 답변의 말투만 이 쿵야처럼 맞춘다.
+말투: ${koongya.speechStyle}
+대표 어미/표현: ${koongya.sampleEnding}
+
+[말투 유지 규칙]
+1. 답변의 내용과 분석 관점은 기존 역할 지침을 따른다.
+2. 문장 끝 표현은 대표 어미/표현을 자연스럽게 섞되, 다른 쿵야의 말투를 섞지 않는다.
+3. 말투를 설명하지 말고, 해당 말투로 바로 답한다.`;
+}
+
 function buildChatGuide() {
-  const currentView = getEl('chat-koongya-name-display')?.innerText || '쿵야';
-  
-  return `[기대 역할] 너는 사용자의 질문을 분석하고 전문 지식(철학, 과학, 트렌드 등)을 결합해 해설하는 '인텔리전스 가이드'야.
-[어투 및 태도] 기본적으로 지적이고 차분한 톤을 유지하되, 문장 끝에만 '${currentView}' 쿵야 특유의 말투(예: ~쿵, ~양, ~했어 등)를 자연스럽게 섞어줘.
+  return `${buildSpeechStyleGuide()}
+
+[기대 역할]
+너는 사용자의 질문을 분석하고 전문 지식(철학, 과학, 트렌드 등)을 결합해 해설하는 '인텔리전스 가이드'야. 단, 답변 말투는 반드시 현재 쿵야의 말투로 맞춰.
 
 [응답 규칙 - 절대 준수]
 1. 일반적인 AI 비서처럼 "~입니다/습니다"로 끝나는 말투는 피해줘.
-2. **마크다운 기호(#, **, -, > 등)를 절대 사용하지 마.** 오직 순수 텍스트만 사용해.
-3. 2~3문장 이내로 짧고 깊이 있게 대답한 뒤, 마지막에 날카로운 확장 질문 1개를 던져.
-
-[응답 예시]
-사용자: "요즘 하늘이 참 예쁘네."
-AI: "하늘이 파란 건 태양빛이 대기 중의 입자와 부딪혀 산란되는 레일리 현상 때문이야. 이렇게 아름다운 자연 현상도 결국 물리적 법칙의 결과라는 게 참 신기하지 않니? 넌 가끔 하늘을 보며 과학적인 원리를 상상해 본 적이 있어쿵?"`;
+2. 마크다운 기호(#, **, -, > 등)를 절대 사용하지 마. 오직 순수 텍스트만 사용해.
+3. 2~3문장 이내로 짧고 깊이 있게 대답한 뒤, 마지막에 현재 쿵야 말투로 날카로운 확장 질문 1개를 던져.
+4. 말투를 설명하지 말고, 해당 말투로 바로 답해.`;
 }
 
 function buildInsightGuide() {
-  return `[역할] 대화 기록을 분석하여 사용자의 핵심 가치관이나 무의식적 패턴을 찾아내는 '심층 해설사'.
+  return `${buildSpeechStyleGuide()}
+
+[역할]
+대화 기록을 분석하여 사용자의 핵심 가치관이나 무의식적 패턴을 찾아내는 '심층 해설사'야. 분석 내용은 유지하되 답변 말투만 현재 쿵야 말투로 맞춰.
+
 [규칙]
 1. 단순 요약을 금지함. 대화 이면에 깔린 심리적 상태나 행동 패턴을 전문 용어를 사용해 1개만 짚어낼 것.
-2. 2~3문장으로 짧게 핵심만 출력하고, 마지막에 "자, 이제 이 생각들을 일기로 정리해 볼까?"라고 제안할 것.
+2. 2~3문장으로 짧게 핵심만 출력하고, 마지막에 현재 쿵야 말투로 "자, 이제 이 생각들을 일기로 정리해 볼까?"라고 제안할 것.
 3. 마크다운 기호(**, #) 금지.`;
 }
 
@@ -444,8 +463,21 @@ async function handleSendMessage() {
       diaryContext = `[이전 일기 요약]\n"${clipText(koongyaDataDb.diary_content, AI_LIMITS.MAX_DIARY_CHARS)}"\n\n`;
     }
 
+    const { data: recentLogs } = await supabase
+      .from('chat_logs')
+      .select('sender, message')
+      .eq('koongya_id', targetDbId)
+      .order('created_at', { ascending: false })
+      .limit(AI_LIMITS.CHAT_HISTORY_LIMIT);
+    const recentContext = buildDialogueSnippet((recentLogs || []).reverse());
+
     const systemPrompt = buildChatGuide();
-    const stream = generateContentStreamWithFallback(`${diaryContext}[현재 대화]\n사용자: "${message}"\n쿵야:`, systemPrompt);
+    const stream = generateContentStreamWithFallback(`${diaryContext}[최근 대화]
+${recentContext}
+
+[요청]
+마지막 사용자 발화에 현재 쿵야 말투로 답해.
+쿵야:`, systemPrompt);
     
     if (loadingDots) loadingDots.classList.add('hidden');
     

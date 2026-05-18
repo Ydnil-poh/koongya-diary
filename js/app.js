@@ -16,19 +16,25 @@ let currentDbId = null;
 let currentKoongyaId = null;
 let currentStep = 1;
 let currentKoongyaName = '';
-let insightCache = { koongyaId: null, content: null };
+let retrospectiveCache = { koongyaId: null, content: null };
 let aiCooldownTimer = null;
 let lastCooldownToastAt = 0;
 const COOLDOWN_TOAST_INTERVAL_MS = 10 * 1000;
-let insightGenerationInFlight = false;
+let retrospectiveGenerationInFlight = false;
 
 const AI_LIMITS = {
-  CHAT_HISTORY_LIMIT: 4,
-  RETRO_HISTORY_LIMIT: 4,
+  CHAT_HISTORY_LIMIT: 6,
+  RETRO_SOURCE_LOG_LIMIT: 80,
+  RETRO_RECENT_LOG_LIMIT: 6,
+  RETRO_RELEVANT_LOG_LIMIT: 10,
   GRAD_HISTORY_LIMIT: 8,
   MAX_MESSAGE_CHARS: 280,
+  MAX_RETRO_MESSAGE_CHARS: 180,
+  MAX_RETRO_CONTEXT_CHARS: 2400,
   MAX_DIARY_CHARS: 500
 };
+
+const RETRIEVAL_STOPWORDS = new Set(['그리고', '그래서', '그런데', '하지만', '나는', '내가', '너는', '오늘', '그냥', '진짜', '약간', '너무', '이제', '대화', '생각', '쿵야']);
 
 function clipText(value, maxChars) {
   if (!value) return '';
@@ -66,16 +72,25 @@ function buildChatGuide() {
 4. 말투를 설명하지 말고, 해당 말투로 바로 답해.`;
 }
 
-function buildInsightGuide() {
+function buildRetrospectiveGuide() {
   return `${buildSpeechStyleGuide()}
 
 [역할]
-대화 기록을 분석하여 사용자의 핵심 가치관이나 무의식적 패턴을 찾아내는 '심층 해설사'야. 분석 내용은 유지하되 답변 말투만 현재 쿵야 말투로 맞춰.
+너는 대화에서 이미 나온 단편적인 생각들을 일기 글감으로 정리하는 '회고 편집자'야. 새 관점으로 사고를 확장하지 말고, 지난 대화에서 나온 내용만 압축하고 재배치해.
 
-[규칙]
-1. 단순 요약을 금지함. 대화 이면에 깔린 심리적 상태나 행동 패턴을 전문 용어를 사용해 1개만 짚어낼 것.
-2. 2~3문장으로 짧게 핵심만 출력하고, 마지막에 현재 쿵야 말투로 "자, 이제 이 생각들을 일기로 정리해 볼까?"라고 제안할 것.
-3. 마크다운 기호(**, #) 금지.`;
+[정리 원칙]
+1. 사용자 발화를 중심 자료로 삼고, 쿵야 발화는 생각의 연결 흐름을 파악하는 보조 단서로만 사용해.
+2. 심리 분석, 전문 용어 해설, 새로운 조언, 추가 확장 질문은 하지 마.
+3. 흩어진 생각을 시간순 그대로 나열하지 말고 출발점 → 감정/인식 → 이유/근거 → 일기로 이어질 문장 흐름으로 재배치해.
+4. 중복 표현은 합치고, 서로 이어지는 생각은 한 문장으로 묶어.
+5. 출력은 순수 텍스트만 사용하고 마크다운 기호(**, #, -, > 등)는 쓰지 마.
+
+[출력 형식]
+오늘의 글감
+1. 출발점: 사용자가 처음 꺼낸 핵심 생각을 1문장으로 정리
+2. 이어진 생각: 대화 중 반복되거나 연결된 생각을 2~3문장으로 정리
+3. 일기로 옮길 흐름: 그대로 일기 첫 문단에 써도 어색하지 않게 3~5문장으로 매끄럽게 정리
+마지막 문장: "자, 이제 이 흐름을 네 일기로 다듬어 볼까?"를 현재 쿵야 말투로 변형해 마무리`;
 }
 
 function buildDialogueSnippet(logs, maxChars = AI_LIMITS.MAX_MESSAGE_CHARS) {
@@ -85,11 +100,76 @@ function buildDialogueSnippet(logs, maxChars = AI_LIMITS.MAX_MESSAGE_CHARS) {
     .join('\n');
 }
 
-function buildInsightContext(logs) {
-  if (!logs || logs.length === 0) return '';
-  return logs
-    .map((log) => `${log.sender === 'user' ? '사용자' : '쿵야'}: ${log.message}`)
-    .join('\n');
+function tokenizeForRetrieval(value) {
+  const tokens = (value || '').toLowerCase().match(/[가-힣a-z0-9]{2,}/g) || [];
+  return tokens.filter((token) => !RETRIEVAL_STOPWORDS.has(token));
+}
+
+function buildRetrievalWeights(logs) {
+  return logs.reduce((weights, log) => {
+    if (log.sender !== 'user') return weights;
+    tokenizeForRetrieval(log.message).forEach((token) => {
+      weights.set(token, (weights.get(token) || 0) + 1);
+    });
+    return weights;
+  }, new Map());
+}
+
+function scoreRetrospectiveLog(log, index, totalCount, weights) {
+  const uniqueTokens = new Set(tokenizeForRetrieval(log.message));
+  let keywordScore = 0;
+  uniqueTokens.forEach((token) => {
+    keywordScore += weights.get(token) || 0;
+  });
+
+  const userBoost = log.sender === 'user' ? 1.5 : 0;
+  const recencyBoost = totalCount > 1 ? index / (totalCount - 1) : 0;
+  return keywordScore + userBoost + recencyBoost;
+}
+
+function selectRetrospectiveLogs(logs) {
+  if (!logs || logs.length === 0) return [];
+
+  const weights = buildRetrievalWeights(logs);
+  const selectedIndexes = new Set();
+  const firstUserIndex = logs.findIndex((log) => log.sender === 'user');
+
+  if (firstUserIndex >= 0) selectedIndexes.add(firstUserIndex);
+
+  const recentStartIndex = Math.max(logs.length - AI_LIMITS.RETRO_RECENT_LOG_LIMIT, 0);
+  logs.slice(recentStartIndex).forEach((_, offset) => {
+    selectedIndexes.add(recentStartIndex + offset);
+  });
+
+  logs
+    .map((log, index) => ({ index, score: scoreRetrospectiveLog(log, index, logs.length, weights) }))
+    .sort((a, b) => b.score - a.score)
+    .slice(0, AI_LIMITS.RETRO_RELEVANT_LOG_LIMIT)
+    .forEach(({ index }) => selectedIndexes.add(index));
+
+  return [...selectedIndexes]
+    .filter((index) => index >= 0 && index < logs.length)
+    .sort((a, b) => a - b)
+    .map((index) => logs[index]);
+}
+
+function buildRetrospectiveContext(logs) {
+  const selectedLogs = selectRetrospectiveLogs(logs);
+  if (selectedLogs.length === 0) return '';
+
+  const lines = selectedLogs.map((log, index) => {
+    const speaker = log.sender === 'user' ? '사용자' : '쿵야';
+    return `${index + 1}. ${speaker}: ${clipText(log.message, AI_LIMITS.MAX_RETRO_MESSAGE_CHARS)}`;
+  });
+
+  let context = '';
+  for (const line of lines) {
+    const nextContext = context ? `${context}\n${line}` : line;
+    if (nextContext.length > AI_LIMITS.MAX_RETRO_CONTEXT_CHARS) break;
+    context = nextContext;
+  }
+
+  return context;
 }
 
 function parseCooldownSeconds(error) {
@@ -450,7 +530,7 @@ async function handleSendMessage() {
     await saveChatLog(targetDbId, 'user', message);
     appendChatLogItem(chatLog, message, 'user');
     chatInput.value = '';
-    insightCache = { koongyaId: null, content: null };
+    retrospectiveCache = { koongyaId: null, content: null };
 
     // 2. AI 대기 UI
     if (activeMessageText) activeMessageText.innerText = '';
@@ -514,8 +594,8 @@ async function saveChatLog(dbId, sender, message) {
   }
 }
 
-async function generateAIInsight() {
-  if (insightGenerationInFlight) return;
+async function generateRetrospectiveDraft() {
+  if (retrospectiveGenerationInFlight) return;
   
   if (getAiCooldownRemainingMs() > 0) {
     syncAICooldownUI();
@@ -527,54 +607,54 @@ async function generateAIInsight() {
   const targetArea = getEl('active-message-text');
   
   try {
-    insightGenerationInFlight = true;
+    retrospectiveGenerationInFlight = true;
     if (regenBtn) regenBtn.disabled = true;
 
-    if (insightCache.koongyaId === currentDbId && insightCache.content) {
-      if (targetArea) targetArea.innerHTML = `<div class="insight-box">${insightCache.content.replace(/\n/g, '<br>')}</div>`;
+    if (retrospectiveCache.koongyaId === currentDbId && retrospectiveCache.content) {
+      if (targetArea) targetArea.innerHTML = `<div class="insight-box">${retrospectiveCache.content.replace(/\n/g, '<br>')}</div>`;
       return;
     }
 
-    if (targetArea) targetArea.innerHTML = '<p class="status-text">쿵야가 대화를 정리하고 있어요...</p>';
+    if (targetArea) targetArea.innerHTML = '<p class="status-text">쿵야가 대화를 글감으로 정리하고 있어요...</p>';
 
     const { data: logs, error: logsError } = await supabase
       .from('chat_logs')
       .select('sender, message')
       .eq('koongya_id', currentDbId)
       .order('created_at', { ascending: false })
-      .limit(AI_LIMITS.RETRO_HISTORY_LIMIT);
+      .limit(AI_LIMITS.RETRO_SOURCE_LOG_LIMIT);
 
     if (logsError) throw logsError;
 
-    const chatContext = buildInsightContext((logs || []).reverse());
-    const systemPrompt = buildInsightGuide();
+    const chatContext = buildRetrospectiveContext((logs || []).reverse());
+    const systemPrompt = buildRetrospectiveGuide();
     
-    console.log('[Insight] AI 분석 요청 시작');
+    console.log('[Retrospective] 글감 정리 요청 시작');
     const result = await generateContentWithFallback(
-      `[대화 기록]\n${chatContext}\n\n[요청]\n대화를 분석하고 입체적인 해설을 제공해 줘.`,
+      `[대화 기록]\n${chatContext}\n\n[요청]\n대화에서 나온 단편적인 생각들을 하나의 매끄러운 일기 글감으로 압축하고 재배치해 줘.`,
       systemPrompt
     );
     
-    const insightText = result.response.text();
-    console.log('[Insight] AI 분석 완료');
+    const retrospectiveText = result.response.text();
+    console.log('[Retrospective] 글감 정리 완료');
     
-    insightCache = { koongyaId: currentDbId, content: insightText };
+    retrospectiveCache = { koongyaId: currentDbId, content: retrospectiveText };
     
-    // 통합된 UI: 좌측 하단 스트리밍 영역에 인사이트 출력
-    getEl('dialogue-label').innerText = '쿵야의 정리';
-    if (targetArea) targetArea.innerHTML = `<div class="insight-box">${insightText.replace(/\n/g, '<br>')}</div>`;
+    // 통합된 UI: 좌측 하단 스트리밍 영역에 정리된 글감 출력
+    getEl('dialogue-label').innerText = '정리된 글감';
+    if (targetArea) targetArea.innerHTML = `<div class="insight-box">${retrospectiveText.replace(/\n/g, '<br>')}</div>`;
 
   } catch (error) {
-    console.error('[Insight] 에러:', error);
+    console.error('[Retrospective] 에러:', error);
     if (parseCooldownSeconds(error) > 0) {
       syncAICooldownUI();
       getEl('active-message-text').innerHTML = '<p class="status-text">쿵야가 조금 지쳤나봐요. 잠시 후 다시 부탁해 주세요.</p>';
     } else {
-      getEl('active-message-text').innerHTML = '<p class="status-text">정리에 실패했어요. 다시 한번 말씀해 주세요.</p>';
-      showToast('정리 실패: ' + (error.message || '알 수 없는 오류'));
+      getEl('active-message-text').innerHTML = '<p class="status-text">글감 정리에 실패했어요. 다시 한번 말씀해 주세요.</p>';
+      showToast('글감 정리 실패: ' + (error.message || '알 수 없는 오류'));
     }
   } finally {
-    insightGenerationInFlight = false;
+    retrospectiveGenerationInFlight = false;
     if (regenBtn && getAiCooldownRemainingMs() <= 0) {
       regenBtn.disabled = false;
     }
@@ -602,8 +682,8 @@ function toggleChatMode(mode) {
   
   // 라벨 및 텍스트 리셋/설정
   if (isRetro) {
-    getEl('dialogue-label').innerText = '쿵야의 정리';
-    getEl('active-message-text').innerHTML = '<p class="status-text">쿵야가 오늘 나눈 대화를 정리하고 있어요...</p>';
+    getEl('dialogue-label').innerText = '정리된 글감';
+    getEl('active-message-text').innerHTML = '<p class="status-text">쿵야가 오늘 나눈 대화를 글감으로 정리하고 있어요...</p>';
   } else {
     getEl('dialogue-label').innerText = '쿵야의 생각';
     getEl('active-message-text').innerText = '';
@@ -612,7 +692,7 @@ function toggleChatMode(mode) {
 
 async function openRetrospective() {
   toggleChatMode('retro');
-  generateAIInsight();
+  generateRetrospectiveDraft();
   const diaryInput = getEl('diary-input');
   diaryInput.value = '불러오는 중...';
   try {
@@ -715,7 +795,7 @@ async function saveDiaryAndEvolve() {
       getEl('chat-koongya-img').src = newImgPath;
       getEl('chat-koongya-step').innerText = currentStep;
       
-      insightCache = { koongyaId: null, content: null };
+      retrospectiveCache = { koongyaId: null, content: null };
       showToast(`🎉 ${targetKoongyaName} 쿵야가 ${nextStep}단계로 진화했습니다!`);
 
       // 회고 모드 종료 및 대화창 갱신
@@ -795,8 +875,8 @@ async function initApp() {
     toggleChatMode('chat');
   });
   bindClick('regenerate-insight-btn', () => {
-    insightCache = { koongyaId: null, content: null };
-    generateAIInsight();
+    retrospectiveCache = { koongyaId: null, content: null };
+    generateRetrospectiveDraft();
   });
   bindClick('close-graduation-modal', () => {
     const m = getEl('graduation-modal');
